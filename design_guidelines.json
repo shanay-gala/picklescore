@@ -1,0 +1,229 @@
+{
+  "app_name": "PickleScore",
+  "personality": "7 Dark-First Utility",
+  "personality_one_liner": "A high-contrast, tactical command center designed for instant readability and fast action during live play.",
+  "color": {
+    "surface": {
+      "light": "#F2F4F7",
+      "dark": "#0B0D0F"
+    },
+    "onSurface": {
+      "light": "#111418",
+      "dark": "#FFFFFF"
+    },
+    "surfaceSecondary": {
+      "light": "#FFFFFF",
+      "dark": "#16191D"
+    },
+    "onSurfaceSecondary": {
+      "light": "#4A5568",
+      "dark": "#A0ABC0"
+    },
+    "surfaceTertiary": {
+      "light": "#E2E8F0",
+      "dark": "#20242A"
+    },
+    "onSurfaceTertiary": {
+      "light": "#2D3748",
+      "dark": "#CBD5E1"
+    },
+    "surfaceInverse": {
+      "light": "#0B0D0F",
+      "dark": "#F2F4F7"
+    },
+    "onSurfaceInverse": {
+      "light": "#FFFFFF",
+      "dark": "#111418"
+    },
+    "brand": {
+      "light": "#D4FF00",
+      "dark": "#D4FF00"
+    },
+    "brandPrimary": {
+      "light": "#D4FF00",
+      "dark": "#D4FF00"
+    },
+    "onBrandPrimary": {
+      "light": "#000000",
+      "dark": "#000000"
+    },
+    "brandSecondary": {
+      "light": "#000000",
+      "dark": "#FFFFFF"
+    },
+    "onBrandSecondary": {
+      "light": "#FFFFFF",
+      "dark": "#000000"
+    },
+    "brandTertiary": {
+      "light": "#EEFF99",
+      "dark": "#333D00"
+    },
+    "onBrandTertiary": {
+      "light": "#1A1D00",
+      "dark": "#D4FF00"
+    },
+    "success": {
+      "light": "#10B981",
+      "dark": "#10B981"
+    },
+    "onSuccess": {
+      "light": "#FFFFFF",
+      "dark": "#000000"
+    },
+    "warning": {
+      "light": "#F59E0B",
+      "dark": "#F59E0B"
+    },
+    "onWarning": {
+      "light": "#000000",
+      "dark": "#000000"
+    },
+    "error": {
+      "light": "#EF4444",
+      "dark": "#EF4444"
+    },
+    "onError": {
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF"
+    },
+    "info": {
+      "light": "#3B82F6",
+      "dark": "#3B82F6"
+    },
+    "onInfo": {
+      "light": "#FFFFFF",
+      "dark": "#FFFFFF"
+    },
+    "border": {
+      "light": "#E2E8F0",
+      "dark": "#2A2F36"
+    },
+    "borderStrong": {
+      "light": "#CBD5E1",
+      "dark": "#3F4652"
+    },
+    "divider": {
+      "light": "#E2E8F0",
+      "dark": "#2A2F36"
+    }
+  },
+  "typography": {
+    "displayFontFamily": "Bebas Neue",
+    "textFontFamily": "DM Sans",
+    "scale": {
+      "sm": 12,
+      "base": 14,
+      "lg": 16,
+      "xl": 20,
+      "2xl": 24,
+      "score": 96
+    }
+  },
+  "spacing": {
+    "rule": "Generous spacing around live scores for readability. Tight utility spacing in admin tables and settings.",
+    "xs": 4,
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 24,
+    "2xl": 32,
+    "3xl": 48
+  },
+  "radius_tokens": {
+    "sm": 6,
+    "md": 12,
+    "lg": 20,
+    "pill": 999
+  },
+  "shadow_tier": 0,
+  "navigation": "bottom_tabs",
+  "icon_set": "Phosphor",
+  "glassmorphism": {
+    "enabled": false,
+    "do's": ["Use solid colors or tinted surfaces for performance on active scoreboards."],
+    "dont's": ["Avoid heavy glass blur over moving numbers or active scoring screens to ensure immediate tactile response."]
+  },
+  "platform_libraries": {
+    "glass": {
+      "ios": "expo-glass-effect",
+      "android": "expo-blur",
+      "low_end_android_fallback": "solid surfaceSecondary"
+    },
+    "image": "expo-image",
+    "blur": "expo-blur",
+    "bottom_sheet": "@gorhom/bottom-sheet",
+    "animation": "react-native-reanimated",
+    "gesture": "react-native-gesture-handler"
+  },
+  "screens": [
+    {
+      "name": "Public Live Dashboard",
+      "purpose": "Provides spectators with a fast, auto-refreshing view of live matches, schedule, and leaderboard.",
+      "states": {
+        "loading": "Centered brand-colored activity indicator with a 'Loading Match Data...' prompt.",
+        "empty": "No active matches. Show an abstract pickleball net illustration with 'Tournament resumes soon'.",
+        "error": "Failed to sync. Retry button prominently displayed."
+      },
+      "layout": "Sticky top tabs (Live | Upcoming | Completed | Leaderboard). Matches presented as edge-to-edge cards with solid dividers. Live matches feature a pulsing 'Live' indicator. Team names large (Bebas Neue), score bold and high-contrast. Use a 2-column grid for tablet, single column full width for mobile."
+    },
+    {
+      "name": "Referee Match Scoring (HERO)",
+      "purpose": "A massive, one-handed touch target interface designed to increment live scores instantly without looking.",
+      "states": {
+        "loading": "Skeleton of the split view.",
+        "empty": "Match not started. Large 'Start Match' CTA in center.",
+        "error": "Connection lost banner at the top, scoring capabilities remain available offline to sync later."
+      },
+      "layout": "Screen split horizontally into two massive tap targets taking up 80% of the screen. Top block (Team A), Bottom block (Team B). Each block contains the Team Name, enormous 96pt+ Score centered, and serves as a full-bleed `Pressable` for +1 point. A distinct 'Undo' icon button sits safely in the bottom safe area alongside the 'Finish Match' swipe-to-confirm slider. Colors of blocks slightly differ to indicate court side."
+    },
+    {
+      "name": "Match Card Component",
+      "purpose": "A scan-friendly summary of a match's current state.",
+      "states": {
+        "loading": "Skeleton rectangles for team names and scores.",
+        "empty": "N/A",
+        "error": "N/A"
+      },
+      "layout": "Card uses `surfaceSecondary`. Left side: Team A and Team B stacked vertically. Right side: Corresponding scores. Top right: Badge (Live in red, Upcoming in subtle gray, Completed in brand green). High contrast text, minimal padding to keep it tight."
+    },
+    {
+      "name": "Admin Management & Login",
+      "purpose": "A strict utility interface for organizing the tournament and managing access.",
+      "states": {
+        "loading": "Full screen overlay spinner.",
+        "empty": "No teams created. Large 'Add First Team' button.",
+        "error": "Inline text error under failed input."
+      },
+      "layout": "Login uses a clean single-column form with large touch targets. Referee PIN is a 4-box input. Admin CRUD screens use stacked rows (list view) with a floating action button (FAB) for adding new entries. Forms have labels above inputs and a sticky 'Save' button at the bottom."
+    }
+  ],
+  "images": {
+    "hero_background": {
+      "url": "https://images.unsplash.com/photo-1722444732959-f50e30ee29d0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1Nzl8MHwxfHNlYXJjaHwyfHxwaWNrbGViYWxsJTIwY291cnQlMjB0ZXh0dXJlfGVufDB8fHx8MTc4MjM4NTI3N3ww&ixlib=rb-4.1.0&q=85",
+      "dark": "https://images.unsplash.com/photo-1687639166604-b91cf403fe61?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGRhcmslMjBncmVlbiUyMG5lb24lMjBzcG9ydHMlMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc4MjM4NTI3N3ww&ixlib=rb-4.1.0&q=85",
+      "alt": "Abstract pickleball court texture"
+    },
+    "empty_state_illustration": {
+      "url": "https://images.pexels.com/photos/17299530/pexels-photo-17299530.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "dark": "https://images.pexels.com/photos/16707924/pexels-photo-16707924.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "alt": "Pickleball paddle and net"
+    }
+  },
+  "haptics": {
+    "score_increment": "impactHeavy",
+    "undo_action": "impactMedium",
+    "match_finish": "notificationSuccess",
+    "tab_switch": "selection",
+    "admin_save": "notificationSuccess"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the color palette provided. Use Volt Green (#D4FF00) as the primary brand color for highlights and active states.",
+    "Implement the Referee Match Scoring screen with massive 96pt fonts for the score using the `Bebas Neue` font. Divide the screen horizontally into two massive interactive blocks.",
+    "Do NOT use any blue, purple, indigo, or navy colors anywhere in the UI. Ensure absolute adherence to the color rules.",
+    "Use Phosphor icons consistently across all screens with a filled weight for active states and regular weight for inactive states.",
+    "Ensure dark mode and light mode are handled correctly with high contrast. The utility layout should prioritize function and readability above all else.",
+    "Add a vertical top-to-bottom gradient scrim (transparent to surfaceInverse) over any background imagery used on the dashboard or splash screen.",
+    "Avoid glassmorphism to keep the UI snappy and high-performance, fitting the utility sports app aesthetic."
+  ]
+}
