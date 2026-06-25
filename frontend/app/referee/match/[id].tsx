@@ -144,7 +144,7 @@ export default function ScoringScreen() {
               <Text style={{ color: theme.onBrand, fontWeight: "900", letterSpacing: 1 }}>RESUME</Text>
             </Pressable>
             <Pressable testID="finish-match-btn" disabled={busy}
-              onPress={() => confirm("Finish this match now?", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.back(), 600); return r; }); })}
+              onPress={() => confirm("Finish this match now?", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.canGoBack() ? router.back() : router.replace("/admin"), 600); return r; }); })}
               style={[styles.actionBtn, { backgroundColor: theme.error, flex: 1 }]}>
               <Ionicons name="flag" size={18} color="#fff" />
               <Text style={{ color: "#fff", fontWeight: "900" }}>END</Text>
@@ -171,7 +171,7 @@ export default function ScoringScreen() {
               <Text style={{ color: "#000", fontWeight: "800", fontSize: fontSize.sm }}>PAUSE</Text>
             </Pressable>
             <Pressable testID="finish-match-btn" disabled={busy}
-              onPress={() => confirm("End this match? Winner will be locked in.", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.back(), 600); return r; }); })}
+              onPress={() => confirm("End this match? Winner will be locked in.", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.canGoBack() ? router.back() : router.replace("/admin"), 600); return r; }); })}
               style={[styles.actionBtn, { backgroundColor: theme.error, flex: 1.4 }]}>
               <Ionicons name="flag" size={20} color="#fff" />
               <Text style={{ color: "#fff", fontWeight: "900", letterSpacing: 1, fontSize: fontSize.sm }}>END</Text>
