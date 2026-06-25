@@ -14,9 +14,9 @@ import { Badge, Card, EmptyState, Loader, Sub, statusColor } from "@/src/ui";
 type TabKey = "live" | "upcoming" | "completed" | "leaderboard";
 const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: "live", label: "Live", icon: "radio" },
-  { key: "upcoming", label: "Upcoming", icon: "time-outline" },
+  { key: "upcoming", label: "Next", icon: "time-outline" },
   { key: "completed", label: "Results", icon: "checkmark-done" },
-  { key: "leaderboard", label: "Standings", icon: "trophy" },
+  { key: "leaderboard", label: "Ranks", icon: "trophy" },
 ];
 
 export default function Dashboard() {
@@ -111,7 +111,7 @@ export default function Dashboard() {
               onPress={() => setTab(t.key)}
               style={{
                 flexShrink: 0,
-                paddingHorizontal: spacing.lg,
+                paddingHorizontal: spacing.md,
                 height: 36,
                 borderRadius: radius.pill,
                 backgroundColor: active ? theme.brand : "transparent",
