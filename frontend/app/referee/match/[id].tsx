@@ -1,4 +1,4 @@
-// HERO: Referee Match Scoring — two massive +1 blocks
+// HERO: Referee Match Scoring — two massive +1 blocks with start/pause/undo/finish
 import { useEffect, useState } from "react";
 import { Alert, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
@@ -15,18 +15,19 @@ import { Loader } from "@/src/ui";
 export default function ScoringScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { theme } = useTheme();
-  const [match, setMatch] = useState<any>(null);
+  const [m, setM] = useState<any>(null);
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
 
   const load = async () => {
     if (!id) return;
-    try { setMatch(await api.getMatch(id)); } catch {}
+    try { setM(await api.getMatch(id)); } catch {}
   };
 
   useEffect(() => { load(); }, [id]);
-  useLive((msg) => { if (msg.type === "match_changed" && msg.match_id === id) load(); });
+  useLive((msg) => { if (msg.type === "fixture_changed" && msg.match_id === id) load(); });
 
-  if (!match) return <Loader />;
+  if (!m) return <Loader />;
 
   const hap = (kind: "impact" | "warn" | "success") => {
     if (Platform.OS === "web") return;
@@ -35,86 +36,62 @@ export default function ScoringScreen() {
     else Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
   };
 
-  const score = async (side: "a" | "b") => {
-    if (busy || match.status === "completed") return;
-    setBusy(true);
+  const safe = async (label: string, fn: () => Promise<any>) => {
+    setBusy(true); setErr("");
+    try { const next = await fn(); setM(next); }
+    catch (e: any) { setErr(e?.message || `${label} failed`); }
+    finally { setBusy(false); }
+  };
+
+  const confirm = (msg: string, cb: () => void) => {
+    if (Platform.OS === "web") { if (window.confirm(msg)) cb(); return; }
+    Alert.alert("Confirm", msg, [{ text: "Cancel", style: "cancel" }, { text: "OK", onPress: cb }]);
+  };
+
+  const live = m.status === "live";
+  const paused = m.status === "paused";
+  const completed = m.status === "completed";
+  const scheduled = m.status === "scheduled";
+
+  const score = (side: "a" | "b") => {
+    if (!live || busy) return;
     hap("impact");
-    try {
-      const m = await api.scorePoint(id!, side);
-      setMatch(m);
-    } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed");
-    } finally {
-      setBusy(false);
-    }
+    safe("score", () => api.scorePoint(id!, side));
   };
-
-  const undo = async () => {
-    if (busy) return;
-    setBusy(true);
-    hap("warn");
-    try {
-      const m = await api.undoPoint(id!);
-      setMatch(m);
-    } catch (e: any) {} finally { setBusy(false); }
-  };
-
-  const finish = async () => {
-    if (busy) return;
-    const confirm = (callback: () => void) => {
-      if (Platform.OS === "web") { if (window.confirm("Finish this match?")) callback(); return; }
-      Alert.alert("Finish match?", "This will mark the match completed and update standings.", [
-        { text: "Cancel", style: "cancel" },
-        { text: "Finish", style: "destructive", onPress: callback },
-      ]);
-    };
-    confirm(async () => {
-      setBusy(true);
-      hap("success");
-      try {
-        const m = await api.finishMatch(id!);
-        setMatch(m);
-        setTimeout(() => router.back(), 800);
-      } catch (e: any) {
-        Alert.alert("Error", e?.message || "Failed");
-      } finally { setBusy(false); }
-    });
-  };
-
-  const completed = match.status === "completed";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface }} edges={["top", "bottom"]}>
-      {/* Top mini bar */}
       <View style={[styles.topBar, { borderBottomColor: theme.border }]}>
         <Pressable testID="back-btn" onPress={() => router.back()} hitSlop={10} style={{ padding: spacing.xs }}>
           <Ionicons name="chevron-back" size={28} color={theme.onSurface} />
         </Pressable>
         <View style={{ alignItems: "center" }}>
-          <Text style={{ color: theme.brand, fontSize: fontSize.xs, fontWeight: "900", letterSpacing: 2 }}>COURT {match.court_number}</Text>
-          <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs, marginTop: 2 }}>Target: {match.target_score}</Text>
+          <Text style={{ color: theme.brand, fontSize: fontSize.xs, fontWeight: "900", letterSpacing: 2 }}>
+            COURT {m.court_number} · R{m.round_number} M{m.match_number}
+          </Text>
+          <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs, marginTop: 2 }}>
+            {scheduled ? "Not started" : paused ? "⏸ Paused" : live ? "● Live" : completed ? "✓ Completed" : m.status}
+          </Text>
         </View>
         <View style={{ width: 28 }} />
       </View>
 
+      {err ? <Text testID="match-err" style={{ color: theme.error, textAlign: "center", padding: spacing.sm }}>{err}</Text> : null}
+
       {/* Team A block */}
-      <Pressable
-        testID="score-a-btn"
-        disabled={completed}
-        onPress={() => score("a")}
-        style={({ pressed }) => [styles.scoreBlock, { backgroundColor: theme.surfaceSecondary, borderColor: theme.brand, opacity: pressed ? 0.85 : 1 }]}
-      >
+      <Pressable testID="score-a-btn" disabled={!live || busy} onPress={() => score("a")}
+        style={({ pressed }) => [styles.scoreBlock, { backgroundColor: theme.surfaceSecondary, borderColor: theme.brand, opacity: !live ? 0.85 : pressed ? 0.85 : 1 }]}>
         <View style={{ position: "absolute", top: spacing.md, left: spacing.lg, right: spacing.lg }}>
           <Text style={{ color: theme.brand, fontSize: fontSize.xs, fontWeight: "900", letterSpacing: 2 }}>TEAM A</Text>
-          <Text style={{ color: theme.onSurface, fontSize: fontSize.xl, fontWeight: "900" }} numberOfLines={1}>{match.team_a_name}</Text>
+          <Text style={{ color: theme.onSurface, fontSize: fontSize.lg, fontWeight: "900" }} numberOfLines={1}>{m.team_a_name}</Text>
           <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs }} numberOfLines={1}>
-            {match.team_a_players?.map((p: any) => p.name).join(" · ") || "—"}
+            {m.team_a_players?.map((p: any) => p.name).join(" · ") || "—"}
           </Text>
         </View>
         <Text testID="score-a-value" style={{ color: theme.onSurface, fontSize: fontSize.score, fontWeight: "900", lineHeight: fontSize.score }}>
-          {match.score_a}
+          {m.score_a}
         </Text>
-        {!completed && (
+        {live && (
           <View style={{ position: "absolute", bottom: spacing.md, right: spacing.lg, flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Ionicons name="add-circle" size={20} color={theme.brand} />
             <Text style={{ color: theme.brand, fontWeight: "900", letterSpacing: 1 }}>TAP +1</Text>
@@ -123,37 +100,72 @@ export default function ScoringScreen() {
       </Pressable>
 
       {/* Action bar */}
-      <View style={[styles.actions, { borderColor: theme.border }]}>
-        <Pressable testID="undo-btn" onPress={undo} disabled={completed} style={[styles.actionBtn, { backgroundColor: theme.surfaceTertiary, opacity: completed ? 0.4 : 1 }]}>
-          <Ionicons name="arrow-undo" size={20} color={theme.onSurface} />
-          <Text style={{ color: theme.onSurface, fontWeight: "800", fontSize: fontSize.sm }}>UNDO</Text>
-        </Pressable>
-        <Pressable testID="finish-btn" onPress={finish} style={[styles.actionBtn, { backgroundColor: completed ? theme.success : theme.error, flex: 2 }]}>
-          <Ionicons name={completed ? "trophy" : "flag"} size={20} color="#fff" />
-          <Text style={{ color: "#fff", fontWeight: "900", letterSpacing: 1, fontSize: fontSize.base }}>
-            {completed ? "MATCH COMPLETED" : "FINISH MATCH"}
-          </Text>
-        </Pressable>
+      <View style={styles.actions}>
+        {scheduled ? (
+          <Pressable testID="start-match-btn" disabled={busy}
+            onPress={() => safe("start", () => api.startMatch(id!))}
+            style={[styles.actionBtn, { backgroundColor: theme.brand, flex: 1 }]}>
+            <Ionicons name="play" size={22} color={theme.onBrand} />
+            <Text style={{ color: theme.onBrand, fontWeight: "900", letterSpacing: 1 }}>START MATCH</Text>
+          </Pressable>
+        ) : paused ? (
+          <>
+            <Pressable testID="resume-match-btn" disabled={busy}
+              onPress={() => safe("resume", () => api.resumeMatch(id!))}
+              style={[styles.actionBtn, { backgroundColor: theme.brand, flex: 2 }]}>
+              <Ionicons name="play" size={20} color={theme.onBrand} />
+              <Text style={{ color: theme.onBrand, fontWeight: "900", letterSpacing: 1 }}>RESUME</Text>
+            </Pressable>
+            <Pressable testID="finish-match-btn" disabled={busy}
+              onPress={() => confirm("Finish this match now?", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.back(), 600); return r; }); })}
+              style={[styles.actionBtn, { backgroundColor: theme.error, flex: 1 }]}>
+              <Ionicons name="flag" size={18} color="#fff" />
+              <Text style={{ color: "#fff", fontWeight: "900" }}>FINISH</Text>
+            </Pressable>
+          </>
+        ) : completed ? (
+          <View style={[styles.actionBtn, { backgroundColor: theme.success, flex: 1 }]}>
+            <Ionicons name="trophy" size={20} color="#fff" />
+            <Text style={{ color: "#fff", fontWeight: "900", letterSpacing: 1 }}>MATCH COMPLETED</Text>
+          </View>
+        ) : (
+          <>
+            <Pressable testID="undo-btn" disabled={busy}
+              onPress={() => { hap("warn"); safe("undo", () => api.undoPoint(id!)); }}
+              style={[styles.actionBtn, { backgroundColor: theme.surfaceTertiary }]}>
+              <Ionicons name="arrow-undo" size={20} color={theme.onSurface} />
+              <Text style={{ color: theme.onSurface, fontWeight: "800", fontSize: fontSize.sm }}>UNDO</Text>
+            </Pressable>
+            <Pressable testID="pause-match-btn" disabled={busy}
+              onPress={() => safe("pause", () => api.pauseMatch(id!))}
+              style={[styles.actionBtn, { backgroundColor: theme.warning }]}>
+              <Ionicons name="pause" size={20} color="#000" />
+              <Text style={{ color: "#000", fontWeight: "800", fontSize: fontSize.sm }}>PAUSE</Text>
+            </Pressable>
+            <Pressable testID="finish-match-btn" disabled={busy}
+              onPress={() => confirm("End this match? Score will be locked.", () => { hap("success"); safe("finish", async () => { const r = await api.finishMatch(id!); setTimeout(() => router.back(), 600); return r; }); })}
+              style={[styles.actionBtn, { backgroundColor: theme.error, flex: 1.4 }]}>
+              <Ionicons name="flag" size={20} color="#fff" />
+              <Text style={{ color: "#fff", fontWeight: "900", letterSpacing: 1, fontSize: fontSize.sm }}>END MATCH</Text>
+            </Pressable>
+          </>
+        )}
       </View>
 
       {/* Team B block */}
-      <Pressable
-        testID="score-b-btn"
-        disabled={completed}
-        onPress={() => score("b")}
-        style={({ pressed }) => [styles.scoreBlock, { backgroundColor: theme.brandTertiary, borderColor: theme.brand, opacity: pressed ? 0.85 : 1 }]}
-      >
+      <Pressable testID="score-b-btn" disabled={!live || busy} onPress={() => score("b")}
+        style={({ pressed }) => [styles.scoreBlock, { backgroundColor: theme.brandTertiary, borderColor: theme.brand, opacity: !live ? 0.85 : pressed ? 0.85 : 1 }]}>
         <View style={{ position: "absolute", top: spacing.md, left: spacing.lg, right: spacing.lg }}>
           <Text style={{ color: theme.onBrandTertiary, fontSize: fontSize.xs, fontWeight: "900", letterSpacing: 2 }}>TEAM B</Text>
-          <Text style={{ color: theme.onBrandTertiary, fontSize: fontSize.xl, fontWeight: "900" }} numberOfLines={1}>{match.team_b_name}</Text>
+          <Text style={{ color: theme.onBrandTertiary, fontSize: fontSize.lg, fontWeight: "900" }} numberOfLines={1}>{m.team_b_name}</Text>
           <Text style={{ color: theme.onBrandTertiary, fontSize: fontSize.xs, opacity: 0.7 }} numberOfLines={1}>
-            {match.team_b_players?.map((p: any) => p.name).join(" · ") || "—"}
+            {m.team_b_players?.map((p: any) => p.name).join(" · ") || "—"}
           </Text>
         </View>
         <Text testID="score-b-value" style={{ color: theme.onBrandTertiary, fontSize: fontSize.score, fontWeight: "900", lineHeight: fontSize.score }}>
-          {match.score_b}
+          {m.score_b}
         </Text>
-        {!completed && (
+        {live && (
           <View style={{ position: "absolute", bottom: spacing.md, right: spacing.lg, flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Ionicons name="add-circle" size={20} color={theme.onBrandTertiary} />
             <Text style={{ color: theme.onBrandTertiary, fontWeight: "900", letterSpacing: 1 }}>TAP +1</Text>

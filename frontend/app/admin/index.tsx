@@ -1,4 +1,4 @@
-// Admin home — Teams roster + Matches CRUD with quick scheduling
+// Admin home — Fixtures (create, list) + Teams roster + Referees
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
@@ -9,15 +9,15 @@ import { useTheme } from "@/src/ThemeContext";
 import { api, clearAuth, getUser } from "@/src/api";
 import { useLive } from "@/src/useLive";
 import { fontSize, radius, spacing } from "@/src/theme";
-import { Badge, Btn, Card, EmptyState, Input, Loader, Sub, statusColor } from "@/src/ui";
+import { Badge, Btn, Card, EmptyState, Input, Loader, Sub } from "@/src/ui";
 
-type Tab = "matches" | "teams" | "referees";
+type Tab = "fixtures" | "teams" | "referees";
 
 export default function AdminHome() {
   const { theme } = useTheme();
-  const [tab, setTab] = useState<Tab>("matches");
+  const [tab, setTab] = useState<Tab>("fixtures");
   const [teams, setTeams] = useState<any[]>([]);
-  const [matches, setMatches] = useState<any[]>([]);
+  const [fixtures, setFixtures] = useState<any[]>([]);
   const [refs, setRefs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
@@ -25,8 +25,12 @@ export default function AdminHome() {
 
   const load = useCallback(async () => {
     try {
-      const [t, m, r] = await Promise.all([api.listTeams(), api.listMatches(), api.listReferees().catch(() => [])]);
-      setTeams(t); setMatches(m); setRefs(r as any[]);
+      const [t, f, r] = await Promise.all([
+        api.listTeams(),
+        api.listFixtures(),
+        api.listReferees().catch(() => [] as any[]),
+      ]);
+      setTeams(t); setFixtures(f); setRefs(r as any[]);
     } finally { setLoading(false); }
   }, []);
 
@@ -61,11 +65,11 @@ export default function AdminHome() {
         contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: spacing.sm, height: 56, alignItems: "center" }}
         style={{ height: 56, maxHeight: 56, borderBottomWidth: 1, borderBottomColor: theme.border }}
       >
-        {(["matches", "teams", "referees"] as Tab[]).map((k) => {
+        {(["fixtures", "teams", "referees"] as Tab[]).map((k) => {
           const active = tab === k;
           return (
             <Pressable key={k} testID={`admin-tab-${k}`} onPress={() => setTab(k)}
-              style={{ flexShrink: 0, paddingHorizontal: spacing.lg, height: 36, borderRadius: radius.pill,
+              style={{ flexShrink: 0, paddingHorizontal: spacing.md, height: 36, borderRadius: radius.pill,
                 backgroundColor: active ? theme.brand : "transparent", borderWidth: 1, borderColor: active ? theme.brand : theme.border }}>
               <Text style={{ color: active ? theme.onBrand : theme.onSurface, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase", lineHeight: 34 }}>{k}</Text>
             </Pressable>
@@ -73,66 +77,61 @@ export default function AdminHome() {
         })}
       </ScrollView>
 
-      {tab === "matches" && (
-        <MatchesTab matches={matches} teams={teams} onChange={load} />
+      {tab === "fixtures" && (
+        <FixturesTab fixtures={fixtures} onChange={load} />
       )}
       {tab === "teams" && <TeamsTab teams={teams} />}
       {tab === "referees" && <RefereesTab refs={refs} onChange={load} showModal={showRefModal} setShowModal={setShowRefModal} />}
 
-      {tab === "matches" && (
-        <Pressable testID="create-match-fab" onPress={() => setShowCreate(true)}
+      {tab === "fixtures" && (
+        <Pressable testID="create-fixture-fab" onPress={() => setShowCreate(true)}
           style={[styles.fab, { backgroundColor: theme.brand }]}>
           <Ionicons name="add" size={28} color={theme.onBrand} />
         </Pressable>
       )}
 
-      <CreateMatchModal visible={showCreate} onClose={() => setShowCreate(false)} teams={teams} onCreated={load} />
+      <CreateFixtureModal visible={showCreate} onClose={() => setShowCreate(false)} teams={teams} onCreated={load} />
     </SafeAreaView>
   );
 }
 
-function MatchesTab({ matches, teams, onChange }: { matches: any[]; teams: any[]; onChange: () => void }) {
+function FixturesTab({ fixtures, onChange }: { fixtures: any[]; onChange: () => void }) {
   const { theme } = useTheme();
-  const [editing, setEditing] = useState<any>(null);
-
   const del = async (id: string) => {
-    if (Platform.OS === "web" && !window.confirm("Delete this match?")) return;
-    await api.deleteMatch(id); onChange();
+    if (Platform.OS === "web" && !window.confirm("Delete this fixture and all 12 matches?")) return;
+    await api.deleteFixture(id); onChange();
   };
 
   return (
-    <>
-      <FlatList
-        data={matches}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100, gap: spacing.sm }}
-        ListEmptyComponent={<EmptyState icon="calendar-outline" title="No matches yet" subtitle="Tap + to schedule the first match" />}
-        renderItem={({ item }) => {
-          const sc = statusColor(item.status, theme);
-          const ready = (item.team_a_player_ids?.length || 0) === 2 && (item.team_b_player_ids?.length || 0) === 2;
-          return (
+    <FlatList
+      data={fixtures}
+      keyExtractor={(f) => f.id}
+      contentContainerStyle={{ padding: spacing.lg, paddingBottom: 100, gap: spacing.md }}
+      ListEmptyComponent={<EmptyState icon="calendar-outline" title="No fixtures yet" subtitle="Tap + to schedule a fixture (12 matches will auto-create)" />}
+      renderItem={({ item }) => (
+        <View>
+          <Pressable testID={`admin-fixture-${item.id}`} onPress={() => router.push(`/fixture/${item.id}`)}>
             <Card>
               <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-                <Text style={{ color: theme.onSurfaceSecondary, fontWeight: "800", letterSpacing: 1 }}>COURT {item.court_number}</Text>
-                <Badge label={item.status === "live" ? "● LIVE" : item.status} color={sc} />
+                <Text style={{ color: theme.onSurfaceSecondary, fontWeight: "800", letterSpacing: 1 }}>COURT {item.court_number} · {item.matches_completed}/{item.matches_total}</Text>
+                <Badge label={item.status === "live" ? "● LIVE" : item.status.toUpperCase()} color={item.status === "live" ? theme.error : item.status === "completed" ? theme.success : theme.onSurfaceSecondary} />
               </View>
-              <Text style={{ color: theme.onSurface, fontWeight: "900", fontSize: fontSize.lg }}>{item.team_a_name}  vs  {item.team_b_name}</Text>
-              <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.sm, marginTop: 4 }}>Score: {item.score_a} – {item.score_b} • Target {item.target_score}</Text>
-              {!ready && <Text style={{ color: theme.warning, fontSize: fontSize.xs, marginTop: 4 }}>⚠ Assign 2 players per team to start</Text>}
-              <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
-                <Btn small title="Edit / Assign" icon="create-outline" variant="secondary" testID={`edit-match-${item.id}`} onPress={() => setEditing(item)} />
-                {item.status === "completed" ? null : (
-                  <Btn small title={item.status === "live" ? "Live" : "Start"} icon="play" variant={item.status === "live" ? "ghost" : "primary"} testID={`start-match-${item.id}`}
-                    onPress={async () => { await api.startMatch(item.id); onChange(); }} disabled={!ready} />
-                )}
-                <Btn small title="" icon="trash" variant="danger" testID={`delete-match-${item.id}`} onPress={() => del(item.id)} />
+              <Text style={{ color: theme.onSurface, fontWeight: "900", fontSize: fontSize.lg }} numberOfLines={1}>{item.team_a_name}</Text>
+              <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs, marginVertical: 2 }}>vs</Text>
+              <Text style={{ color: theme.onSurface, fontWeight: "900", fontSize: fontSize.lg }} numberOfLines={1}>{item.team_b_name}</Text>
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: spacing.sm }}>
+                <Text style={{ color: theme.onSurface, fontSize: fontSize.xxl, fontWeight: "900" }}>{item.total_a} – {item.total_b}</Text>
+                <View style={{ flexDirection: "row", gap: spacing.sm }}>
+                  <Btn small title="Manage" icon="construct" variant="secondary" testID={`manage-fixture-${item.id}`}
+                    onPress={() => router.push(`/fixture/${item.id}`)} />
+                  <Btn small title="" icon="trash" variant="danger" testID={`delete-fixture-${item.id}`} onPress={() => del(item.id)} />
+                </View>
               </View>
             </Card>
-          );
-        }}
-      />
-      <EditMatchModal match={editing} teams={teams} onClose={() => setEditing(null)} onSaved={onChange} />
-    </>
+          </Pressable>
+        </View>
+      )}
+    />
   );
 }
 
@@ -166,10 +165,8 @@ function RefereesTab({ refs, onChange, showModal, setShowModal }: any) {
 
   const create = async () => {
     setErr("");
-    try {
-      await api.createReferee({ name, pin });
-      setName(""); setPin(""); setShowModal(false); onChange();
-    } catch (e: any) { setErr(e?.message || "Failed"); }
+    try { await api.createReferee({ name, pin }); setName(""); setPin(""); setShowModal(false); onChange(); }
+    catch (e: any) { setErr(e?.message || "Failed"); }
   };
   const del = async (id: string) => {
     if (Platform.OS === "web" && !window.confirm("Remove referee?")) return;
@@ -212,35 +209,39 @@ function RefereesTab({ refs, onChange, showModal, setShowModal }: any) {
   );
 }
 
-function CreateMatchModal({ visible, onClose, teams, onCreated }: any) {
+function CreateFixtureModal({ visible, onClose, teams, onCreated }: any) {
   const { theme } = useTheme();
   const [court, setCourt] = useState("1");
   const [aId, setAId] = useState("");
   const [bId, setBId] = useState("");
   const [target, setTarget] = useState("11");
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => { if (visible) { setCourt("1"); setAId(""); setBId(""); setTarget("11"); setErr(""); } }, [visible]);
 
   const create = async () => {
-    setErr("");
+    setBusy(true); setErr("");
     try {
-      await api.createMatch({
+      const f = await api.createFixture({
         team_a_id: aId, team_b_id: bId,
         court_number: parseInt(court) || 1,
         target_score: parseInt(target) || 11,
-        team_a_player_ids: [], team_b_player_ids: [],
       });
       onCreated(); onClose();
+      router.push(`/fixture/${f.id}`);
     } catch (e: any) { setErr(e?.message || "Failed"); }
+    finally { setBusy(false); }
   };
 
   return (
     <Modal visible={visible} transparent animationType="fade">
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.modalBg, { backgroundColor: "rgba(0,0,0,0.6)" }]}>
         <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          <View style={[styles.modal, { backgroundColor: theme.surfaceSecondary, maxHeight: 560 }]}>
-            <Text style={{ color: theme.onSurface, fontSize: fontSize.xl, fontWeight: "900", marginBottom: spacing.md }}>New Match</Text>
+          <View style={[styles.modal, { backgroundColor: theme.surfaceSecondary, maxHeight: 600 }]}>
+            <Text style={{ color: theme.onSurface, fontSize: fontSize.xl, fontWeight: "900" }}>New Fixture</Text>
+            <Sub>Creates 4 rounds × 3 matches = 12 matches. Assign players from the fixture page.</Sub>
+            <View style={{ height: spacing.md }} />
             <Sub>Court Number</Sub>
             <Input value={court} onChangeText={setCourt} placeholder="1" keyboardType="number-pad" testID="court-input" />
             <View style={{ height: spacing.md }} />
@@ -250,12 +251,12 @@ function CreateMatchModal({ visible, onClose, teams, onCreated }: any) {
             <Sub>Team B</Sub>
             <TeamPicker teams={teams} selected={bId} exclude={aId} onPick={setBId} testIDPrefix="team-b" />
             <View style={{ height: spacing.md }} />
-            <Sub>Target Score</Sub>
+            <Sub>Target Score per match</Sub>
             <Input value={target} onChangeText={setTarget} placeholder="11" keyboardType="number-pad" testID="target-input" />
             {err ? <Text style={{ color: theme.error, marginTop: spacing.sm }}>{err}</Text> : null}
             <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
-              <Btn title="Cancel" variant="ghost" onPress={onClose} testID="cancel-create-match" />
-              <Btn title="Create" variant="primary" onPress={create} disabled={!aId || !bId} testID="confirm-create-match" />
+              <Btn title="Cancel" variant="ghost" onPress={onClose} testID="cancel-create-fixture" />
+              <Btn title={busy ? "..." : "Create"} variant="primary" onPress={create} disabled={busy || !aId || !bId} testID="confirm-create-fixture" />
             </View>
           </View>
         </ScrollView>
@@ -279,91 +280,6 @@ function TeamPicker({ teams, selected, exclude, onPick, testIDPrefix }: any) {
         );
       })}
     </ScrollView>
-  );
-}
-
-function EditMatchModal({ match, teams, onClose, onSaved }: any) {
-  const { theme } = useTheme();
-  const [aPlayers, setAPlayers] = useState<string[]>([]);
-  const [bPlayers, setBPlayers] = useState<string[]>([]);
-  const [court, setCourt] = useState("1");
-  const [scoreA, setScoreA] = useState("0");
-  const [scoreB, setScoreB] = useState("0");
-
-  useEffect(() => {
-    if (match) {
-      setAPlayers(match.team_a_player_ids || []);
-      setBPlayers(match.team_b_player_ids || []);
-      setCourt(String(match.court_number));
-      setScoreA(String(match.score_a));
-      setScoreB(String(match.score_b));
-    }
-  }, [match]);
-
-  if (!match) return null;
-  const teamA = teams.find((t: any) => t.id === match.team_a_id);
-  const teamB = teams.find((t: any) => t.id === match.team_b_id);
-
-  const togglePlayer = (list: string[], setList: any, id: string) => {
-    if (list.includes(id)) setList(list.filter((x) => x !== id));
-    else if (list.length < 2) setList([...list, id]);
-  };
-
-  const save = async () => {
-    await api.updateMatch(match.id, {
-      court_number: parseInt(court) || 1,
-      team_a_player_ids: aPlayers, team_b_player_ids: bPlayers,
-      score_a: parseInt(scoreA) || 0, score_b: parseInt(scoreB) || 0,
-    });
-    onSaved(); onClose();
-  };
-
-  return (
-    <Modal visible transparent animationType="fade">
-      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={[styles.modalBg, { backgroundColor: "rgba(0,0,0,0.7)" }]}>
-        <ScrollView contentContainerStyle={{ padding: spacing.lg }}>
-          <View style={[styles.modal, { backgroundColor: theme.surfaceSecondary }]}>
-            <Text style={{ color: theme.onSurface, fontSize: fontSize.xl, fontWeight: "900", marginBottom: spacing.sm }}>Edit Match</Text>
-            <Sub>Court</Sub>
-            <Input value={court} onChangeText={setCourt} keyboardType="number-pad" testID="edit-court-input" />
-            <View style={{ height: spacing.md }} />
-            <Text style={{ color: theme.brand, fontWeight: "900" }}>{teamA?.name} — pick 2 players</Text>
-            {teamA?.players?.map((p: any) => {
-              const on = aPlayers.includes(p.id);
-              return (
-                <Pressable key={p.id} testID={`pa-${p.id}`} onPress={() => togglePlayer(aPlayers, setAPlayers, p.id)}
-                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, gap: 8 }}>
-                  <Ionicons name={on ? "checkbox" : "square-outline"} size={20} color={on ? theme.brand : theme.onSurfaceSecondary} />
-                  <Text style={{ color: theme.onSurface, fontWeight: p.is_captain ? "900" : "600" }}>{p.is_captain ? "★ " : ""}{p.name}</Text>
-                </Pressable>
-              );
-            })}
-            <View style={{ height: spacing.md }} />
-            <Text style={{ color: theme.brand, fontWeight: "900" }}>{teamB?.name} — pick 2 players</Text>
-            {teamB?.players?.map((p: any) => {
-              const on = bPlayers.includes(p.id);
-              return (
-                <Pressable key={p.id} testID={`pb-${p.id}`} onPress={() => togglePlayer(bPlayers, setBPlayers, p.id)}
-                  style={{ flexDirection: "row", alignItems: "center", paddingVertical: 8, gap: 8 }}>
-                  <Ionicons name={on ? "checkbox" : "square-outline"} size={20} color={on ? theme.brand : theme.onSurfaceSecondary} />
-                  <Text style={{ color: theme.onSurface, fontWeight: p.is_captain ? "900" : "600" }}>{p.is_captain ? "★ " : ""}{p.name}</Text>
-                </Pressable>
-              );
-            })}
-            <View style={{ height: spacing.md }} />
-            <Sub>Score override (use only to fix mistakes)</Sub>
-            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: 4 }}>
-              <Input value={scoreA} onChangeText={setScoreA} keyboardType="number-pad" testID="edit-score-a" style={{ flex: 1 }} />
-              <Input value={scoreB} onChangeText={setScoreB} keyboardType="number-pad" testID="edit-score-b" style={{ flex: 1 }} />
-            </View>
-            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
-              <Btn title="Cancel" variant="ghost" onPress={onClose} testID="cancel-edit-match" />
-              <Btn title="Save" variant="primary" onPress={save} testID="save-edit-match" />
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </Modal>
   );
 }
 

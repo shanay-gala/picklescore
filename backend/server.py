@@ -1,7 +1,8 @@
 """PickleScore - Pickleball Tournament Live Scoring backend.
 
-FastAPI + MongoDB (motor) + JWT auth + WebSocket real-time updates.
-All routes prefixed with /api.
+Fixture-based hierarchy:
+  Tournament → Fixtures → 4 Rounds × 3 Matches each → 2v2 Match
+  Tournament leaderboard aggregates POINTS scored across every match.
 """
 from __future__ import annotations
 
@@ -24,7 +25,6 @@ from fastapi import (
     HTTPException,
     WebSocket,
     WebSocketDisconnect,
-    status,
 )
 from fastapi.security import OAuth2PasswordBearer
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -40,11 +40,14 @@ DB_NAME = os.environ.get("DB_NAME", "picklescore")
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "picklescore-dev-secret-change-me-please-very-long")
 JWT_ALG = "HS256"
-TOKEN_TTL_MIN = 60 * 24 * 7  # 1 week
+TOKEN_TTL_MIN = 60 * 24 * 7
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "shanaygala@gmail.com")
 ADMIN_DEFAULT_PASSWORD = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
 REFEREE_DEFAULT_PIN = os.environ.get("REFEREE_DEFAULT_PIN", "1234")
+
+ROUNDS_PER_FIXTURE = 4
+MATCHES_PER_ROUND = 3
 
 logging.basicConfig(
     level=logging.INFO,
@@ -52,16 +55,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("picklescore")
 
-# ---------- DB ----------
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 users_col = db.users
 teams_col = db.teams
 players_col = db.players
+fixtures_col = db.fixtures
 matches_col = db.matches
 
 
-# ---------- Hashing ----------
 def hash_pw(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
@@ -73,7 +75,7 @@ def check_pw(plain: str, hashed: str) -> bool:
         return False
 
 
-# ---------- Models (request/response) ----------
+# ---------- Pydantic models ----------
 class AdminLogin(BaseModel):
     email: EmailStr
     password: str
@@ -91,6 +93,11 @@ class TokenOut(BaseModel):
     name: Optional[str] = None
 
 
+class TeamIn(BaseModel):
+    name: str
+    captain_name: Optional[str] = ""
+
+
 class PlayerIn(BaseModel):
     name: str
     contact: Optional[str] = ""
@@ -99,41 +106,20 @@ class PlayerIn(BaseModel):
     team_id: str
 
 
-class PlayerOut(BaseModel):
-    id: str
-    name: str
-    contact: str = ""
-    age: Optional[int] = None
-    category: str = "beginner"
-    team_id: str
-    is_captain: bool = False
-
-
-class TeamIn(BaseModel):
-    name: str
-    captain_name: Optional[str] = ""
-
-
-class TeamOut(BaseModel):
-    id: str
-    name: str
-    captain_name: str = ""
-    created_at: str
-
-
-class MatchCreate(BaseModel):
+class FixtureCreate(BaseModel):
     team_a_id: str
     team_b_id: str
     court_number: int = 1
-    scheduled_at: Optional[str] = None  # ISO string
-    team_a_player_ids: list[str] = Field(default_factory=list)
-    team_b_player_ids: list[str] = Field(default_factory=list)
-    target_score: int = 11
+    scheduled_at: Optional[str] = None
+    target_score: int = 11  # per individual match
+
+
+class FixtureUpdate(BaseModel):
+    court_number: Optional[int] = None
+    scheduled_at: Optional[str] = None
 
 
 class MatchUpdate(BaseModel):
-    court_number: Optional[int] = None
-    scheduled_at: Optional[str] = None
     team_a_player_ids: Optional[list[str]] = None
     team_b_player_ids: Optional[list[str]] = None
     target_score: Optional[int] = None
@@ -180,11 +166,10 @@ def require_role(*roles: str):
         if user.get("role") not in roles:
             raise HTTPException(403, "Forbidden")
         return user
-
     return _checker
 
 
-# ---------- WebSocket manager ----------
+# ---------- WS hub ----------
 class WSHub:
     def __init__(self) -> None:
         self.clients: set[WebSocket] = set()
@@ -214,7 +199,7 @@ class WSHub:
 hub = WSHub()
 
 
-# ---------- Seeding ----------
+# ---------- Seed ----------
 SEED_TEAMS = [
     {"name": "TEAM SAMEER", "captain": "sameer deepak chheda", "players": [
         ("dheer gada", "7045111081", 20, "beginner"),
@@ -286,9 +271,13 @@ SEED_TEAMS = [
 async def seed_initial() -> None:
     now = datetime.now(timezone.utc).isoformat()
 
-    # Seed admin
-    admin = await users_col.find_one({"email": ADMIN_EMAIL, "role": "admin"})
-    if not admin:
+    # Migration: drop legacy match docs that pre-date the fixture schema.
+    legacy = await matches_col.count_documents({"fixture_id": {"$exists": False}})
+    if legacy:
+        await matches_col.delete_many({"fixture_id": {"$exists": False}})
+        log.info("Dropped %d legacy matches without fixture_id", legacy)
+
+    if not await users_col.find_one({"email": ADMIN_EMAIL, "role": "admin"}):
         await users_col.insert_one({
             "id": str(uuid.uuid4()),
             "email": ADMIN_EMAIL,
@@ -299,9 +288,7 @@ async def seed_initial() -> None:
         })
         log.info("Seeded admin %s", ADMIN_EMAIL)
 
-    # Seed a default referee (PIN=1234)
-    ref = await users_col.find_one({"role": "referee", "name": "Referee 1"})
-    if not ref:
+    if not await users_col.find_one({"role": "referee", "name": "Referee 1"}):
         await users_col.insert_one({
             "id": str(uuid.uuid4()),
             "role": "referee",
@@ -311,23 +298,16 @@ async def seed_initial() -> None:
         })
         log.info("Seeded referee PIN=%s", REFEREE_DEFAULT_PIN)
 
-    # Seed teams + players
     if await teams_col.count_documents({}) == 0:
         for t in SEED_TEAMS:
             team_id = str(uuid.uuid4())
             await teams_col.insert_one({
-                "id": team_id,
-                "name": t["name"],
-                "captain_name": t["captain"],
-                "created_at": now,
+                "id": team_id, "name": t["name"], "captain_name": t["captain"], "created_at": now,
             })
             for (pname, contact, age, cat) in t["players"]:
                 await players_col.insert_one({
                     "id": str(uuid.uuid4()),
-                    "name": pname,
-                    "contact": contact,
-                    "age": age,
-                    "category": cat,
+                    "name": pname, "contact": contact, "age": age, "category": cat,
                     "team_id": team_id,
                     "is_captain": pname.strip().lower() == t["captain"].strip().lower(),
                     "created_at": now,
@@ -335,7 +315,6 @@ async def seed_initial() -> None:
         log.info("Seeded %d teams", len(SEED_TEAMS))
 
 
-# ---------- Lifespan ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await seed_initial()
@@ -346,37 +325,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PickleScore", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 api = APIRouter(prefix="/api")
 
 
 # ---------- Helpers ----------
-def strip_id(doc: dict) -> dict:
-    if doc:
-        doc.pop("_id", None)
-    return doc
-
-
 async def get_team(team_id: str) -> dict:
     t = await teams_col.find_one({"id": team_id}, {"_id": 0})
     if not t:
-        raise HTTPException(404, f"Team {team_id} not found")
+        raise HTTPException(404, "Team not found")
     return t
 
 
-async def serialize_match(m: dict) -> dict:
-    """Attach team + player details for client consumption."""
-    if not m:
-        return m
+async def hydrate_match(m: dict) -> dict:
     m = {k: v for k, v in m.items() if k != "_id"}
-    a = await teams_col.find_one({"id": m["team_a_id"]}, {"_id": 0})
-    b = await teams_col.find_one({"id": m["team_b_id"]}, {"_id": 0})
-    m["team_a_name"] = a["name"] if a else "?"
-    m["team_b_name"] = b["name"] if b else "?"
     pa = await players_col.find(
         {"id": {"$in": m.get("team_a_player_ids", [])}}, {"_id": 0}
     ).to_list(10)
@@ -388,7 +351,50 @@ async def serialize_match(m: dict) -> dict:
     return m
 
 
-# ---------- Routes: health ----------
+async def fixture_summary(f: dict, include_matches: bool = False) -> dict:
+    f = {k: v for k, v in f.items() if k != "_id"}
+    a = await teams_col.find_one({"id": f["team_a_id"]}, {"_id": 0})
+    b = await teams_col.find_one({"id": f["team_b_id"]}, {"_id": 0})
+    f["team_a_name"] = a["name"] if a else "?"
+    f["team_b_name"] = b["name"] if b else "?"
+
+    ms = await matches_col.find({"fixture_id": f["id"]}, {"_id": 0}).sort([("round_number", 1), ("match_number", 1)]).to_list(50)
+    total_a = sum(m.get("score_a", 0) for m in ms)
+    total_b = sum(m.get("score_b", 0) for m in ms)
+    completed = sum(1 for m in ms if m.get("status") == "completed")
+    live = sum(1 for m in ms if m.get("status") == "live")
+    total = len(ms)
+
+    f.setdefault("status", "scheduled")
+    f.setdefault("rounds", [])
+    f["total_a"] = total_a
+    f["total_b"] = total_b
+    f["matches_total"] = total
+    f["matches_completed"] = completed
+    f["matches_live"] = live
+    f["winner_team_id"] = None
+    if f["status"] == "completed":
+        f["winner_team_id"] = f["team_a_id"] if total_a > total_b else (f["team_b_id"] if total_b > total_a else None)
+
+    if include_matches:
+        rounds_meta = {r["round_number"]: r for r in f.get("rounds", [])}
+        rounds_data: dict[int, list[dict]] = {}
+        for m in ms:
+            r = m["round_number"]
+            rounds_data.setdefault(r, []).append(await hydrate_match(m))
+        f["rounds"] = [
+            {
+                **rounds_meta.get(r, {"round_number": r, "status": "scheduled", "started_at": None, "completed_at": None}),
+                "matches": rounds_data[r],
+                "total_a": sum(m.get("score_a", 0) for m in rounds_data[r]),
+                "total_b": sum(m.get("score_b", 0) for m in rounds_data[r]),
+            }
+            for r in sorted(rounds_data.keys())
+        ]
+    return f
+
+
+# ---------- Health ----------
 @api.get("/")
 async def root():
     return {"app": "PickleScore", "status": "ok"}
@@ -399,21 +405,16 @@ async def health():
     return {"ok": True, "ts": datetime.now(timezone.utc).isoformat()}
 
 
-# ---------- Routes: auth ----------
+# ---------- Auth ----------
 @api.post("/auth/admin/login", response_model=TokenOut)
 async def admin_login(body: AdminLogin):
     user = await users_col.find_one({"email": body.email.lower(), "role": "admin"})
-    if not user or not check_pw(body.password, user["password_hash"]):
-        # Try case-sensitive email match too
+    if not user:
         user = await users_col.find_one({"email": body.email, "role": "admin"})
     if not user or not check_pw(body.password, user["password_hash"]):
         raise HTTPException(401, "Invalid admin credentials")
-    return TokenOut(
-        access_token=make_token(user["id"], "admin"),
-        role="admin",
-        user_id=user["id"],
-        name=user.get("name"),
-    )
+    return TokenOut(access_token=make_token(user["id"], "admin"), role="admin",
+                    user_id=user["id"], name=user.get("name"))
 
 
 @api.post("/auth/referee/login", response_model=TokenOut)
@@ -423,45 +424,29 @@ async def referee_login(body: RefereeLogin):
         raise HTTPException(400, "PIN must be 4 digits")
     async for ref in users_col.find({"role": "referee"}):
         if check_pw(pin, ref["pin_hash"]):
-            return TokenOut(
-                access_token=make_token(ref["id"], "referee"),
-                role="referee",
-                user_id=ref["id"],
-                name=ref.get("name"),
-            )
+            return TokenOut(access_token=make_token(ref["id"], "referee"), role="referee",
+                            user_id=ref["id"], name=ref.get("name"))
     raise HTTPException(401, "Invalid PIN")
 
 
 @api.get("/auth/me")
 async def auth_me(user: dict = Depends(current_user)):
-    return {
-        "id": user["id"],
-        "role": user["role"],
-        "name": user.get("name"),
-        "email": user.get("email"),
-    }
+    return {"id": user["id"], "role": user["role"], "name": user.get("name"), "email": user.get("email")}
 
 
-# ---------- Routes: teams ----------
+# ---------- Teams ----------
 @api.get("/teams")
 async def list_teams():
     teams = await teams_col.find({}, {"_id": 0}).sort("name", 1).to_list(100)
-    # attach players
     for t in teams:
-        t["players"] = await players_col.find(
-            {"team_id": t["id"]}, {"_id": 0}
-        ).sort("is_captain", -1).to_list(50)
+        t["players"] = await players_col.find({"team_id": t["id"]}, {"_id": 0}).sort("is_captain", -1).to_list(50)
     return teams
 
 
 @api.post("/teams")
 async def create_team(body: TeamIn, _: dict = Depends(require_role("admin"))):
-    team = {
-        "id": str(uuid.uuid4()),
-        "name": body.name,
-        "captain_name": body.captain_name or "",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    team = {"id": str(uuid.uuid4()), "name": body.name, "captain_name": body.captain_name or "",
+            "created_at": datetime.now(timezone.utc).isoformat()}
     await teams_col.insert_one(team.copy())
     await hub.broadcast({"type": "teams_changed"})
     return team
@@ -469,10 +454,8 @@ async def create_team(body: TeamIn, _: dict = Depends(require_role("admin"))):
 
 @api.put("/teams/{team_id}")
 async def update_team(team_id: str, body: TeamIn, _: dict = Depends(require_role("admin"))):
-    res = await teams_col.update_one(
-        {"id": team_id},
-        {"$set": {"name": body.name, "captain_name": body.captain_name or ""}},
-    )
+    res = await teams_col.update_one({"id": team_id},
+        {"$set": {"name": body.name, "captain_name": body.captain_name or ""}})
     if res.matched_count == 0:
         raise HTTPException(404, "Team not found")
     await hub.broadcast({"type": "teams_changed"})
@@ -487,46 +470,32 @@ async def delete_team(team_id: str, _: dict = Depends(require_role("admin"))):
     return {"ok": True}
 
 
-# ---------- Routes: players ----------
+# ---------- Players ----------
 @api.get("/players")
 async def list_players(team_id: Optional[str] = None):
     q: dict[str, Any] = {}
     if team_id:
         q["team_id"] = team_id
-    players = await players_col.find(q, {"_id": 0}).sort("name", 1).to_list(500)
-    return players
+    return await players_col.find(q, {"_id": 0}).sort("name", 1).to_list(500)
 
 
 @api.post("/players")
 async def create_player(body: PlayerIn, _: dict = Depends(require_role("admin"))):
     await get_team(body.team_id)
-    player = {
-        "id": str(uuid.uuid4()),
-        "name": body.name,
-        "contact": body.contact or "",
-        "age": body.age,
-        "category": body.category or "beginner",
-        "team_id": body.team_id,
-        "is_captain": False,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await players_col.insert_one(player.copy())
+    p = {"id": str(uuid.uuid4()), "name": body.name, "contact": body.contact or "",
+         "age": body.age, "category": body.category or "beginner",
+         "team_id": body.team_id, "is_captain": False,
+         "created_at": datetime.now(timezone.utc).isoformat()}
+    await players_col.insert_one(p.copy())
     await hub.broadcast({"type": "teams_changed"})
-    return player
+    return p
 
 
 @api.put("/players/{player_id}")
 async def update_player(player_id: str, body: PlayerIn, _: dict = Depends(require_role("admin"))):
-    res = await players_col.update_one(
-        {"id": player_id},
-        {"$set": {
-            "name": body.name,
-            "contact": body.contact or "",
-            "age": body.age,
-            "category": body.category or "beginner",
-            "team_id": body.team_id,
-        }},
-    )
+    res = await players_col.update_one({"id": player_id},
+        {"$set": {"name": body.name, "contact": body.contact or "", "age": body.age,
+                  "category": body.category or "beginner", "team_id": body.team_id}})
     if res.matched_count == 0:
         raise HTTPException(404, "Player not found")
     await hub.broadcast({"type": "teams_changed"})
@@ -540,117 +509,275 @@ async def delete_player(player_id: str, _: dict = Depends(require_role("admin"))
     return {"ok": True}
 
 
-# ---------- Routes: matches ----------
-@api.get("/matches")
-async def list_matches(status_filter: Optional[str] = None):
-    q: dict[str, Any] = {}
-    if status_filter:
-        q["status"] = status_filter
-    cursor = matches_col.find(q, {"_id": 0}).sort([("status", 1), ("scheduled_at", 1), ("created_at", 1)])
-    matches = await cursor.to_list(500)
-    return [await serialize_match(m) for m in matches]
+# ---------- Fixtures ----------
+@api.get("/fixtures")
+async def list_fixtures():
+    fs = await fixtures_col.find({}, {"_id": 0}).sort("created_at", 1).to_list(200)
+    return [await fixture_summary(f) for f in fs]
 
 
+@api.get("/fixtures/{fixture_id}")
+async def get_fixture(fixture_id: str):
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Fixture not found")
+    return await fixture_summary(f, include_matches=True)
+
+
+@api.post("/fixtures")
+async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("admin"))):
+    if body.team_a_id == body.team_b_id:
+        raise HTTPException(400, "Teams must differ")
+    await get_team(body.team_a_id)
+    await get_team(body.team_b_id)
+    now = datetime.now(timezone.utc).isoformat()
+    fid = str(uuid.uuid4())
+    fixture = {
+        "id": fid, "team_a_id": body.team_a_id, "team_b_id": body.team_b_id,
+        "court_number": body.court_number, "scheduled_at": body.scheduled_at,
+        "target_score": body.target_score, "created_at": now,
+        "status": "scheduled",  # scheduled | live | completed
+        "started_at": None, "completed_at": None,
+        "rounds": [
+            {"round_number": r, "status": "scheduled", "started_at": None, "completed_at": None}
+            for r in range(1, ROUNDS_PER_FIXTURE + 1)
+        ],
+    }
+    await fixtures_col.insert_one(fixture.copy())
+    # auto-create 12 matches: 4 rounds × 3 matches each
+    for r in range(1, ROUNDS_PER_FIXTURE + 1):
+        for mn in range(1, MATCHES_PER_ROUND + 1):
+            await matches_col.insert_one({
+                "id": str(uuid.uuid4()),
+                "fixture_id": fid,
+                "round_number": r, "match_number": mn,
+                "team_a_id": body.team_a_id, "team_b_id": body.team_b_id,
+                "team_a_player_ids": [], "team_b_player_ids": [],
+                "target_score": body.target_score,
+                "score_a": 0, "score_b": 0,
+                "status": "scheduled", "history": [],
+                "started_at": None, "finished_at": None, "winner_team_id": None,
+                "created_at": now,
+            })
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fid})
+    return await fixture_summary(fixture, include_matches=True)
+
+
+@api.put("/fixtures/{fixture_id}")
+async def update_fixture(fixture_id: str, body: FixtureUpdate, _: dict = Depends(require_role("admin"))):
+    update = {k: v for k, v in body.dict().items() if v is not None}
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    res = await fixtures_col.update_one({"id": fixture_id}, {"$set": update})
+    if res.matched_count == 0:
+        raise HTTPException(404, "Fixture not found")
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return await fixture_summary(f, include_matches=True)
+
+
+@api.delete("/fixtures/{fixture_id}")
+async def delete_fixture(fixture_id: str, _: dict = Depends(require_role("admin"))):
+    await fixtures_col.delete_one({"id": fixture_id})
+    await matches_col.delete_many({"fixture_id": fixture_id})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return {"ok": True}
+
+
+@api.post("/fixtures/{fixture_id}/start")
+async def start_fixture(fixture_id: str, _: dict = Depends(require_role("admin", "referee"))):
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Fixture not found")
+    if f.get("status") == "completed":
+        raise HTTPException(400, "Fixture already completed")
+    now = datetime.now(timezone.utc).isoformat()
+    await fixtures_col.update_one(
+        {"id": fixture_id},
+        {"$set": {"status": "live", "started_at": f.get("started_at") or now}},
+    )
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return await fixture_summary(await fixtures_col.find_one({"id": fixture_id}, {"_id": 0}), include_matches=True)
+
+
+@api.post("/fixtures/{fixture_id}/complete")
+async def complete_fixture(fixture_id: str, _: dict = Depends(require_role("admin", "referee"))):
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Fixture not found")
+    # Require all matches completed
+    incomplete = await matches_col.count_documents({"fixture_id": fixture_id, "status": {"$ne": "completed"}})
+    if incomplete > 0:
+        raise HTTPException(400, f"{incomplete} match(es) still pending. Finish all 12 matches before completing the fixture.")
+    await fixtures_col.update_one(
+        {"id": fixture_id},
+        {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return await fixture_summary(await fixtures_col.find_one({"id": fixture_id}, {"_id": 0}), include_matches=True)
+
+
+@api.post("/fixtures/{fixture_id}/rounds/{round_number}/start")
+async def start_round(fixture_id: str, round_number: int, _: dict = Depends(require_role("admin", "referee"))):
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Fixture not found")
+    if f.get("status") != "live":
+        raise HTTPException(400, "Fixture must be started before a round can begin")
+    rounds = f.get("rounds", [])
+    target = next((r for r in rounds if r["round_number"] == round_number), None)
+    if not target:
+        raise HTTPException(404, "Round not found")
+    if target["status"] == "completed":
+        raise HTTPException(400, "Round already completed")
+    # Require previous rounds completed
+    for r in rounds:
+        if r["round_number"] < round_number and r["status"] != "completed":
+            raise HTTPException(400, f"Complete Round {r['round_number']} before starting Round {round_number}")
+    target["status"] = "live"
+    target["started_at"] = target.get("started_at") or datetime.now(timezone.utc).isoformat()
+    await fixtures_col.update_one({"id": fixture_id}, {"$set": {"rounds": rounds}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return await fixture_summary(await fixtures_col.find_one({"id": fixture_id}, {"_id": 0}), include_matches=True)
+
+
+@api.post("/fixtures/{fixture_id}/rounds/{round_number}/complete")
+async def complete_round(fixture_id: str, round_number: int, _: dict = Depends(require_role("admin", "referee"))):
+    f = await fixtures_col.find_one({"id": fixture_id}, {"_id": 0})
+    if not f:
+        raise HTTPException(404, "Fixture not found")
+    # All 3 matches in this round must be completed
+    pending = await matches_col.count_documents({
+        "fixture_id": fixture_id, "round_number": round_number,
+        "status": {"$ne": "completed"},
+    })
+    if pending > 0:
+        raise HTTPException(400, f"{pending} match(es) in Round {round_number} still pending")
+    rounds = f.get("rounds", [])
+    target = next((r for r in rounds if r["round_number"] == round_number), None)
+    if not target:
+        raise HTTPException(404, "Round not found")
+    target["status"] = "completed"
+    target["completed_at"] = datetime.now(timezone.utc).isoformat()
+    await fixtures_col.update_one({"id": fixture_id}, {"$set": {"rounds": rounds}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
+    return await fixture_summary(await fixtures_col.find_one({"id": fixture_id}, {"_id": 0}), include_matches=True)
+
+
+# ---------- Matches (sub-resources of a fixture) ----------
 @api.get("/matches/{match_id}")
 async def get_match(match_id: str):
     m = await matches_col.find_one({"id": match_id}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Match not found")
-    return await serialize_match(m)
-
-
-@api.post("/matches")
-async def create_match(body: MatchCreate, _: dict = Depends(require_role("admin"))):
-    await get_team(body.team_a_id)
-    await get_team(body.team_b_id)
-    if body.team_a_id == body.team_b_id:
-        raise HTTPException(400, "Teams must be different")
-    match = {
-        "id": str(uuid.uuid4()),
-        "team_a_id": body.team_a_id,
-        "team_b_id": body.team_b_id,
-        "court_number": body.court_number,
-        "scheduled_at": body.scheduled_at,
-        "team_a_player_ids": body.team_a_player_ids[:2],
-        "team_b_player_ids": body.team_b_player_ids[:2],
-        "target_score": body.target_score,
-        "score_a": 0,
-        "score_b": 0,
-        "status": "upcoming",  # upcoming | live | completed
-        "history": [],  # list of "a" or "b" points
-        "winner_team_id": None,
-        "started_at": None,
-        "finished_at": None,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-    await matches_col.insert_one(match.copy())
-    await hub.broadcast({"type": "match_changed", "match_id": match["id"]})
-    return await serialize_match(match)
+    f = await fixtures_col.find_one({"id": m["fixture_id"]}, {"_id": 0})
+    res = await hydrate_match(m)
+    if f:
+        a = await teams_col.find_one({"id": f["team_a_id"]}, {"_id": 0})
+        b = await teams_col.find_one({"id": f["team_b_id"]}, {"_id": 0})
+        res["team_a_name"] = a["name"] if a else "?"
+        res["team_b_name"] = b["name"] if b else "?"
+        res["court_number"] = f.get("court_number", 1)
+    return res
 
 
 @api.put("/matches/{match_id}")
 async def update_match(match_id: str, body: MatchUpdate, _: dict = Depends(require_role("admin"))):
     update: dict[str, Any] = {}
-    for f in ("court_number", "scheduled_at", "team_a_player_ids", "team_b_player_ids",
-              "target_score", "score_a", "score_b", "status"):
-        v = getattr(body, f)
-        if v is not None:
-            if f in ("team_a_player_ids", "team_b_player_ids"):
-                update[f] = v[:2]
-            else:
-                update[f] = v
+    for k, v in body.dict().items():
+        if v is None:
+            continue
+        if k in ("team_a_player_ids", "team_b_player_ids"):
+            update[k] = v[:2]
+        else:
+            update[k] = v
     if not update:
         raise HTTPException(400, "No fields to update")
     res = await matches_col.update_one({"id": match_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Match not found")
     m = await matches_col.find_one({"id": match_id}, {"_id": 0})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return await serialize_match(m)
-
-
-@api.delete("/matches/{match_id}")
-async def delete_match(match_id: str, _: dict = Depends(require_role("admin"))):
-    await matches_col.delete_one({"id": match_id})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return {"ok": True}
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
 
 
 @api.post("/matches/{match_id}/start")
 async def start_match(match_id: str, _: dict = Depends(require_role("admin", "referee"))):
-    now = datetime.now(timezone.utc).isoformat()
-    res = await matches_col.update_one(
-        {"id": match_id, "status": {"$ne": "completed"}},
-        {"$set": {"status": "live", "started_at": now}},
-    )
-    if res.matched_count == 0:
-        raise HTTPException(400, "Cannot start match")
-    m = await matches_col.find_one({"id": match_id}, {"_id": 0})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return await serialize_match(m)
-
-
-@api.post("/matches/{match_id}/score")
-async def score_point(match_id: str, side: str, user: dict = Depends(require_role("admin", "referee"))):
-    if side not in ("a", "b"):
-        raise HTTPException(400, "side must be 'a' or 'b'")
     m = await matches_col.find_one({"id": match_id}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Match not found")
     if m["status"] == "completed":
         raise HTTPException(400, "Match already completed")
+    # Enforce: parent fixture must be live and the round must be live
+    f = await fixtures_col.find_one({"id": m["fixture_id"]}, {"_id": 0})
+    if not f or f.get("status") != "live":
+        raise HTTPException(400, "Start the fixture before starting matches")
+    rd = next((r for r in f.get("rounds", []) if r["round_number"] == m["round_number"]), None)
+    if not rd or rd.get("status") != "live":
+        raise HTTPException(400, f"Round {m['round_number']} must be started first")
+    # Enforce: only one live match per fixture at a time
+    other_live = await matches_col.count_documents({
+        "fixture_id": m["fixture_id"],
+        "status": "live",
+        "id": {"$ne": match_id},
+    })
+    if other_live > 0:
+        raise HTTPException(400, "Another match in this fixture is already live. Pause or finish it first.")
+    if (len(m.get("team_a_player_ids", [])) != 2 or len(m.get("team_b_player_ids", [])) != 2):
+        raise HTTPException(400, "Assign 2 players to each team before starting the match")
+    await matches_col.update_one(
+        {"id": match_id},
+        {"$set": {"status": "live", "started_at": m.get("started_at") or datetime.now(timezone.utc).isoformat()}},
+    )
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
+
+
+@api.post("/matches/{match_id}/pause")
+async def pause_match(match_id: str, _: dict = Depends(require_role("admin", "referee"))):
+    m = await matches_col.find_one({"id": match_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Match not found")
+    if m["status"] != "live":
+        raise HTTPException(400, "Only live matches can be paused")
+    await matches_col.update_one({"id": match_id}, {"$set": {"status": "paused"}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
+
+
+@api.post("/matches/{match_id}/resume")
+async def resume_match(match_id: str, _: dict = Depends(require_role("admin", "referee"))):
+    m = await matches_col.find_one({"id": match_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Match not found")
+    if m["status"] != "paused":
+        raise HTTPException(400, "Only paused matches can be resumed")
+    other_live = await matches_col.count_documents({
+        "fixture_id": m["fixture_id"], "status": "live", "id": {"$ne": match_id},
+    })
+    if other_live > 0:
+        raise HTTPException(400, "Another match in this fixture is already live.")
+    await matches_col.update_one({"id": match_id}, {"$set": {"status": "live"}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
+
+
+@api.post("/matches/{match_id}/score")
+async def score_point(match_id: str, side: str, _: dict = Depends(require_role("admin", "referee"))):
+    if side not in ("a", "b"):
+        raise HTTPException(400, "side must be 'a' or 'b'")
+    m = await matches_col.find_one({"id": match_id}, {"_id": 0})
+    if not m:
+        raise HTTPException(404, "Match not found")
+    if m["status"] != "live":
+        raise HTTPException(400, "Match must be live to score. Start it first.")
     field = "score_a" if side == "a" else "score_b"
     new_score = (m.get(field) or 0) + 1
     history = m.get("history", [])
     history.append(side)
-    update = {field: new_score, "history": history}
-    if m["status"] != "live":
-        update["status"] = "live"
-        update["started_at"] = m.get("started_at") or datetime.now(timezone.utc).isoformat()
-    await matches_col.update_one({"id": match_id}, {"$set": update})
-    m2 = await matches_col.find_one({"id": match_id}, {"_id": 0})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return await serialize_match(m2)
+    await matches_col.update_one({"id": match_id}, {"$set": {field: new_score, "history": history}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
 
 
 @api.post("/matches/{match_id}/undo")
@@ -664,13 +791,9 @@ async def undo_point(match_id: str, _: dict = Depends(require_role("admin", "ref
     last = history.pop()
     field = "score_a" if last == "a" else "score_b"
     new_score = max(0, (m.get(field) or 0) - 1)
-    await matches_col.update_one(
-        {"id": match_id},
-        {"$set": {field: new_score, "history": history}},
-    )
-    m2 = await matches_col.find_one({"id": match_id}, {"_id": 0})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return await serialize_match(m2)
+    await matches_col.update_one({"id": match_id}, {"$set": {field: new_score, "history": history}})
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
 
 
 @api.post("/matches/{match_id}/finish")
@@ -685,18 +808,14 @@ async def finish_match(match_id: str, _: dict = Depends(require_role("admin", "r
         winner = m["team_b_id"]
     await matches_col.update_one(
         {"id": match_id},
-        {"$set": {
-            "status": "completed",
-            "winner_team_id": winner,
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-        }},
+        {"$set": {"status": "completed", "winner_team_id": winner,
+                  "finished_at": datetime.now(timezone.utc).isoformat()}},
     )
-    m2 = await matches_col.find_one({"id": match_id}, {"_id": 0})
-    await hub.broadcast({"type": "match_changed", "match_id": match_id})
-    return await serialize_match(m2)
+    await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
+    return await get_match(match_id)
 
 
-# ---------- Leaderboard ----------
+# ---------- Leaderboard (points-based) ----------
 @api.get("/leaderboard")
 async def leaderboard():
     teams = await teams_col.find({}, {"_id": 0}).to_list(100)
@@ -705,41 +824,58 @@ async def leaderboard():
         stats[t["id"]] = {
             "team_id": t["id"],
             "team_name": t["name"],
+            "fixtures_played": 0,
+            "fixture_wins": 0,
+            "fixture_losses": 0,
             "matches_played": 0,
-            "wins": 0,
-            "losses": 0,
-            "draws": 0,
+            "match_wins": 0,
             "points_for": 0,
             "points_against": 0,
             "points_diff": 0,
-            "tournament_points": 0,
+            "tournament_points": 0,  # = total points scored across every match
         }
-    completed = await matches_col.find({"status": "completed"}, {"_id": 0}).to_list(500)
-    for m in completed:
-        a, b = m["team_a_id"], m["team_b_id"]
+    # Match-level aggregation
+    async for m in matches_col.find({}, {"_id": 0}):
         sa, sb = m.get("score_a", 0), m.get("score_b", 0)
+        if sa == 0 and sb == 0 and m.get("status") != "completed":
+            continue
+        a, b = m["team_a_id"], m["team_b_id"]
         if a in stats:
-            stats[a]["matches_played"] += 1
             stats[a]["points_for"] += sa
             stats[a]["points_against"] += sb
+            stats[a]["tournament_points"] += sa
+            if m.get("status") == "completed":
+                stats[a]["matches_played"] += 1
+                if sa > sb:
+                    stats[a]["match_wins"] += 1
         if b in stats:
-            stats[b]["matches_played"] += 1
             stats[b]["points_for"] += sb
             stats[b]["points_against"] += sa
-        if sa > sb:
-            if a in stats: stats[a]["wins"] += 1
-            if b in stats: stats[b]["losses"] += 1
-        elif sb > sa:
-            if b in stats: stats[b]["wins"] += 1
-            if a in stats: stats[a]["losses"] += 1
-        else:
-            if a in stats: stats[a]["draws"] += 1
-            if b in stats: stats[b]["draws"] += 1
+            stats[b]["tournament_points"] += sb
+            if m.get("status") == "completed":
+                stats[b]["matches_played"] += 1
+                if sb > sa:
+                    stats[b]["match_wins"] += 1
+
+    # Fixture-level aggregation (count completed fixtures only for wins/losses)
+    async for f in fixtures_col.find({}, {"_id": 0}):
+        f_full = await fixture_summary(f)
+        if f_full["status"] != "completed":
+            continue
+        a, b = f_full["team_a_id"], f_full["team_b_id"]
+        if a in stats: stats[a]["fixtures_played"] += 1
+        if b in stats: stats[b]["fixtures_played"] += 1
+        if f_full["total_a"] > f_full["total_b"]:
+            if a in stats: stats[a]["fixture_wins"] += 1
+            if b in stats: stats[b]["fixture_losses"] += 1
+        elif f_full["total_b"] > f_full["total_a"]:
+            if b in stats: stats[b]["fixture_wins"] += 1
+            if a in stats: stats[a]["fixture_losses"] += 1
+
     rows = list(stats.values())
     for r in rows:
         r["points_diff"] = r["points_for"] - r["points_against"]
-        r["tournament_points"] = r["wins"] * 2 + r["draws"] * 1
-    rows.sort(key=lambda r: (-r["tournament_points"], -r["wins"], -r["points_diff"], r["team_name"]))
+    rows.sort(key=lambda r: (-r["tournament_points"], -r["points_diff"], -r["fixture_wins"], r["team_name"]))
     for idx, r in enumerate(rows):
         r["rank"] = idx + 1
     return rows
@@ -748,8 +884,7 @@ async def leaderboard():
 # ---------- Referees admin ----------
 @api.get("/referees")
 async def list_referees(_: dict = Depends(require_role("admin"))):
-    refs = await users_col.find({"role": "referee"}, {"_id": 0, "pin_hash": 0}).to_list(50)
-    return refs
+    return await users_col.find({"role": "referee"}, {"_id": 0, "pin_hash": 0}).to_list(50)
 
 
 @api.post("/referees")
@@ -757,13 +892,8 @@ async def create_referee(body: RefereeCreate, _: dict = Depends(require_role("ad
     pin = body.pin.strip()
     if len(pin) != 4 or not pin.isdigit():
         raise HTTPException(400, "PIN must be 4 digits")
-    ref = {
-        "id": str(uuid.uuid4()),
-        "role": "referee",
-        "name": body.name,
-        "pin_hash": hash_pw(pin),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
+    ref = {"id": str(uuid.uuid4()), "role": "referee", "name": body.name,
+           "pin_hash": hash_pw(pin), "created_at": datetime.now(timezone.utc).isoformat()}
     await users_col.insert_one(ref.copy())
     ref.pop("pin_hash", None)
     return ref
@@ -775,14 +905,13 @@ async def delete_referee(ref_id: str, _: dict = Depends(require_role("admin"))):
     return {"ok": True}
 
 
-# ---------- WebSocket ----------
+# ---------- WS ----------
 @app.websocket("/api/ws")
 async def ws_endpoint(ws: WebSocket):
     await hub.connect(ws)
     try:
         await ws.send_json({"type": "hello"})
         while True:
-            # Heartbeat: client should just keep the connection alive
             data = await ws.receive_text()
             if data == "ping":
                 await ws.send_json({"type": "pong"})

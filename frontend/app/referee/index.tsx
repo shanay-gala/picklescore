@@ -1,4 +1,4 @@
-// Referee home — list of live/upcoming matches the referee can run
+// Referee home — list fixtures referee can run
 import { useCallback, useEffect, useState } from "react";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from "react-native";
 import { router } from "expo-router";
@@ -9,34 +9,29 @@ import { useTheme } from "@/src/ThemeContext";
 import { api, clearAuth, getUser } from "@/src/api";
 import { useLive } from "@/src/useLive";
 import { fontSize, radius, spacing } from "@/src/theme";
-import { Badge, Card, EmptyState, Loader, Sub, statusColor } from "@/src/ui";
+import { Badge, Card, EmptyState, Loader, Sub } from "@/src/ui";
 
 export default function RefereeHome() {
   const { theme } = useTheme();
-  const [matches, setMatches] = useState<any[]>([]);
+  const [fixtures, setFixtures] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [user, setUser] = useState<any>(null);
 
   const load = useCallback(async () => {
-    try {
-      const m = await api.listMatches();
-      setMatches(m.filter((mm: any) => mm.status !== "completed"));
-    } finally { setLoading(false); setRefreshing(false); }
+    try { setFixtures(await api.listFixtures()); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
 
   useEffect(() => {
-    getUser().then((u) => {
-      if (!u || u.role !== "referee") { router.replace("/login"); return; }
-      setUser(u);
-    });
+    getUser().then((u) => { if (!u || u.role !== "referee") { router.replace("/login"); return; } setUser(u); });
     load();
   }, [load]);
-
   useLive(() => load());
 
   const logout = async () => { await clearAuth(); router.replace("/"); };
 
+  const active = fixtures.filter((f) => f.status !== "completed");
   if (loading) return <Loader />;
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.surface }}>
@@ -50,33 +45,27 @@ export default function RefereeHome() {
         </Pressable>
       </View>
       <FlatList
-        data={matches}
-        keyExtractor={(m) => m.id}
-        contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}
+        data={active}
+        keyExtractor={(f) => f.id}
+        contentContainerStyle={{ padding: spacing.lg, gap: spacing.md, paddingBottom: 60 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} tintColor={theme.brand} />}
-        ListHeaderComponent={<Sub>Tap a match to start scoring</Sub>}
-        ListEmptyComponent={<EmptyState icon="flag-outline" title="No assignable matches" subtitle="Ask admin to schedule a match." />}
+        ListHeaderComponent={<Sub>Tap a fixture to manage rounds & matches</Sub>}
+        ListEmptyComponent={<EmptyState icon="flag-outline" title="No assignable fixtures" subtitle="Ask admin to schedule one." />}
         renderItem={({ item }) => {
-          const sc = statusColor(item.status, theme);
-          const ready = (item.team_a_player_ids?.length || 0) === 2 && (item.team_b_player_ids?.length || 0) === 2;
+          const sc = item.status === "live" ? theme.error : theme.onSurfaceSecondary;
           return (
-            <Pressable testID={`ref-match-${item.id}`} onPress={() => router.push(`/referee/match/${item.id}`)}>
+            <Pressable testID={`ref-fixture-${item.id}`} onPress={() => router.push(`/fixture/${item.id}`)}>
               <Card>
                 <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
                   <Text style={{ color: theme.onSurfaceSecondary, fontWeight: "800", letterSpacing: 1 }}>COURT {item.court_number}</Text>
-                  <Badge label={item.status === "live" ? "● LIVE" : item.status} color={sc} />
+                  <Badge label={item.status === "live" ? "● LIVE" : item.status.toUpperCase()} color={sc} />
                 </View>
-                <Text style={{ color: theme.onSurface, fontSize: fontSize.lg, fontWeight: "900" }}>{item.team_a_name}</Text>
+                <Text style={{ color: theme.onSurface, fontSize: fontSize.lg, fontWeight: "900" }} numberOfLines={1}>{item.team_a_name}</Text>
                 <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.sm, marginVertical: 2 }}>vs</Text>
-                <Text style={{ color: theme.onSurface, fontSize: fontSize.lg, fontWeight: "900" }}>{item.team_b_name}</Text>
-                <View style={{ marginTop: spacing.md, flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                  <Text style={{ color: theme.onSurface, fontSize: fontSize.xxl, fontWeight: "900" }}>{item.score_a} – {item.score_b}</Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    {!ready && <Ionicons name="warning" size={14} color={theme.warning} />}
-                    <Text style={{ color: ready ? theme.brand : theme.warning, fontWeight: "800", fontSize: fontSize.sm }}>
-                      {ready ? "READY →" : "PLAYERS NOT ASSIGNED"}
-                    </Text>
-                  </View>
+                <Text style={{ color: theme.onSurface, fontSize: fontSize.lg, fontWeight: "900" }} numberOfLines={1}>{item.team_b_name}</Text>
+                <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginTop: spacing.md }}>
+                  <Text style={{ color: theme.onSurface, fontSize: fontSize.xxl, fontWeight: "900" }}>{item.total_a} – {item.total_b}</Text>
+                  <Text style={{ color: theme.brand, fontWeight: "800", fontSize: fontSize.sm }}>{item.matches_completed}/{item.matches_total} done →</Text>
                 </View>
               </Card>
             </Pressable>

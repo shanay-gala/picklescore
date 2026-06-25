@@ -87,7 +87,7 @@ export async function refereeLogin(pin: string) {
   return data;
 }
 
-// Teams / players / matches
+// Teams / players / fixtures / matches
 export const api = {
   health: () => request("/health", { auth: false }),
   // teams
@@ -104,19 +104,31 @@ export const api = {
   updatePlayer: (id: string, b: any) =>
     request(`/players/${id}`, { method: "PUT", body: JSON.stringify(b) }),
   deletePlayer: (id: string) => request(`/players/${id}`, { method: "DELETE" }),
+  // fixtures
+  listFixtures: () => request<any[]>("/fixtures", { auth: false }),
+  getFixture: (id: string) => request<any>(`/fixtures/${id}`, { auth: false }),
+  createFixture: (b: any) => request("/fixtures", { method: "POST", body: JSON.stringify(b) }),
+  updateFixture: (id: string, b: any) =>
+    request(`/fixtures/${id}`, { method: "PUT", body: JSON.stringify(b) }),
+  deleteFixture: (id: string) => request(`/fixtures/${id}`, { method: "DELETE" }),
+  startFixture: (id: string) => request(`/fixtures/${id}/start`, { method: "POST" }),
+  completeFixture: (id: string) => request(`/fixtures/${id}/complete`, { method: "POST" }),
+  startRound: (fid: string, rn: number) =>
+    request(`/fixtures/${fid}/rounds/${rn}/start`, { method: "POST" }),
+  completeRound: (fid: string, rn: number) =>
+    request(`/fixtures/${fid}/rounds/${rn}/complete`, { method: "POST" }),
   // matches
-  listMatches: (status?: string) =>
-    request<any[]>(`/matches${status ? `?status_filter=${status}` : ""}`, { auth: false }),
   getMatch: (id: string) => request<any>(`/matches/${id}`, { auth: false }),
-  createMatch: (b: any) => request("/matches", { method: "POST", body: JSON.stringify(b) }),
   updateMatch: (id: string, b: any) =>
     request(`/matches/${id}`, { method: "PUT", body: JSON.stringify(b) }),
-  deleteMatch: (id: string) => request(`/matches/${id}`, { method: "DELETE" }),
   startMatch: (id: string) => request(`/matches/${id}/start`, { method: "POST" }),
+  pauseMatch: (id: string) => request(`/matches/${id}/pause`, { method: "POST" }),
+  resumeMatch: (id: string) => request(`/matches/${id}/resume`, { method: "POST" }),
   scorePoint: (id: string, side: "a" | "b") =>
     request(`/matches/${id}/score?side=${side}`, { method: "POST" }),
   undoPoint: (id: string) => request(`/matches/${id}/undo`, { method: "POST" }),
   finishMatch: (id: string) => request(`/matches/${id}/finish`, { method: "POST" }),
+  // misc
   leaderboard: () => request<any[]>("/leaderboard", { auth: false }),
   listReferees: () => request<any[]>("/referees"),
   createReferee: (b: { name: string; pin: string }) =>
