@@ -16,7 +16,7 @@ const TABS: { key: TabKey; label: string; icon: keyof typeof Ionicons.glyphMap }
   { key: "live", label: "Live", icon: "radio" },
   { key: "scheduled", label: "Next", icon: "time-outline" },
   { key: "completed", label: "Results", icon: "checkmark-done" },
-  { key: "leaderboard", label: "Ranks", icon: "trophy" },
+  { key: "leaderboard", label: "Standings", icon: "trophy" },
 ];
 
 export function fixtureStatusColor(status: string, theme: any) {
@@ -71,13 +71,9 @@ export default function Dashboard() {
           <Pressable testID="theme-toggle-btn" onPress={cycleTheme} hitSlop={8} style={[styles.iconBtn, { borderColor: theme.border }]}>
             <Ionicons name={mode === "system" ? "phone-portrait-outline" : mode === "light" ? "sunny" : "moon"} size={18} color={theme.onSurface} />
           </Pressable>
-          {me?.role === "admin" ? (
+          {me?.role === "admin" || me?.role === "referee" ? (
             <Pressable testID="open-admin-btn" onPress={() => router.push("/admin")} hitSlop={8} style={[styles.iconBtn, { backgroundColor: theme.brand, borderColor: theme.brand }]}>
-              <Ionicons name="settings" size={18} color={theme.onBrand} />
-            </Pressable>
-          ) : me?.role === "referee" ? (
-            <Pressable testID="open-referee-btn" onPress={() => router.push("/referee")} hitSlop={8} style={[styles.iconBtn, { backgroundColor: theme.brand, borderColor: theme.brand }]}>
-              <Ionicons name="flag" size={18} color={theme.onBrand} />
+              <Ionicons name="construct" size={18} color={theme.onBrand} />
             </Pressable>
           ) : (
             <Pressable testID="login-btn" onPress={() => router.push("/login")} hitSlop={8} style={[styles.iconBtn, { borderColor: theme.border }]}>
@@ -175,31 +171,56 @@ function FRow({ name, score, accent, winner }: { name: string; score: number; ac
 
 function Leaderboard({ board, onRefresh, refreshing }: { board: any[]; onRefresh: () => void; refreshing: boolean }) {
   const { theme } = useTheme();
+  const rankColor = (rank: number) =>
+    rank === 1 ? "#FFD700" : rank === 2 ? "#C0C0C0" : rank === 3 ? "#CD7F32" : theme.onSurfaceSecondary;
   return (
-    <ScrollView testID="leaderboard" contentContainerStyle={{ padding: spacing.lg, gap: spacing.xs }}
+    <ScrollView testID="leaderboard" contentContainerStyle={{ padding: spacing.lg, gap: spacing.sm }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.brand} />}>
       <View style={{ marginBottom: spacing.sm }}>
-        <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" }}>Points-based ranking</Text>
+        <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs, fontWeight: "700", letterSpacing: 1, textTransform: "uppercase" }}>Points-based standings</Text>
         <Sub>Tournament Points = total points scored across every match in every fixture.</Sub>
       </View>
       <View style={[styles.lbHead, { backgroundColor: theme.surfaceTertiary }]}>
-        <Text style={[styles.lbH, { color: theme.onSurfaceSecondary, width: 26 }]}>#</Text>
-        <Text style={[styles.lbH, { color: theme.onSurfaceSecondary, flex: 1 }]}>Team</Text>
-        <Text style={[styles.lbH, { color: theme.onSurfaceSecondary, width: 28, textAlign: "center" }]}>FW</Text>
-        <Text style={[styles.lbH, { color: theme.onSurfaceSecondary, width: 28, textAlign: "center" }]}>MW</Text>
-        <Text style={[styles.lbH, { color: theme.onSurfaceSecondary, width: 40, textAlign: "center" }]}>+/-</Text>
-        <Text style={[styles.lbH, { color: theme.brand, width: 44, textAlign: "right" }]}>PTS</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, width: 36 }]}>#</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, flex: 1 }]}>Team</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, width: 28, textAlign: "center" }]}>FW</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, width: 28, textAlign: "center" }]}>MW</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, width: 44, textAlign: "center" }]}>+/-</Text>
+        <Text style={[styles.lbH, { color: theme.onSurfaceTertiary, width: 56, textAlign: "right" }]}>PTS</Text>
       </View>
-      {board.map((r) => (
-        <View key={r.team_id} testID={`lb-row-${r.team_id}`} style={[styles.lbRow, { backgroundColor: theme.surfaceSecondary, borderColor: theme.border }]}>
-          <Text style={[styles.lbCell, { color: r.rank <= 3 ? theme.brand : theme.onSurfaceSecondary, width: 26, fontWeight: "900" }]}>{r.rank}</Text>
-          <Text style={[styles.lbCell, { color: theme.onSurface, flex: 1, fontWeight: "800" }]} numberOfLines={1}>{r.team_name}</Text>
-          <Text style={[styles.lbCell, { color: theme.success, width: 28, textAlign: "center", fontWeight: "800" }]}>{r.fixture_wins}</Text>
-          <Text style={[styles.lbCell, { color: theme.onSurface, width: 28, textAlign: "center" }]}>{r.match_wins}</Text>
-          <Text style={[styles.lbCell, { color: theme.onSurface, width: 40, textAlign: "center" }]}>{r.points_diff > 0 ? `+${r.points_diff}` : r.points_diff}</Text>
-          <Text style={[styles.lbCell, { color: theme.brand, width: 44, textAlign: "right", fontWeight: "900", fontSize: fontSize.lg }]}>{r.tournament_points}</Text>
-        </View>
-      ))}
+      {board.map((r) => {
+        const isTop = r.rank <= 3;
+        return (
+          <View key={r.team_id} testID={`lb-row-${r.team_id}`} style={[
+            styles.lbRow,
+            { backgroundColor: theme.surfaceSecondary, borderColor: isTop ? theme.brand : theme.border, borderWidth: isTop ? 2 : 1 },
+          ]}>
+            <View style={{ width: 36, alignItems: "flex-start" }}>
+              <View style={{
+                minWidth: 28, height: 28, borderRadius: 14,
+                backgroundColor: isTop ? rankColor(r.rank) : theme.surfaceTertiary,
+                alignItems: "center", justifyContent: "center", paddingHorizontal: 8,
+              }}>
+                <Text style={{ color: isTop ? "#111" : theme.onSurface, fontWeight: "900", fontSize: fontSize.sm }}>{r.rank}</Text>
+              </View>
+            </View>
+            <Text style={[styles.lbCell, { color: theme.onSurface, flex: 1, fontWeight: "800" }]} numberOfLines={1}>{r.team_name}</Text>
+            <Text style={[styles.lbCell, { color: theme.onSurface, width: 28, textAlign: "center", fontWeight: "800" }]}>{r.fixture_wins}</Text>
+            <Text style={[styles.lbCell, { color: theme.onSurface, width: 28, textAlign: "center" }]}>{r.match_wins}</Text>
+            <Text style={[styles.lbCell, { color: r.points_diff > 0 ? theme.success : r.points_diff < 0 ? theme.error : theme.onSurfaceSecondary, width: 44, textAlign: "center", fontWeight: "700" }]}>
+              {r.points_diff > 0 ? `+${r.points_diff}` : r.points_diff}
+            </Text>
+            <View style={{ width: 56, alignItems: "flex-end" }}>
+              <View style={{
+                backgroundColor: theme.brand, paddingHorizontal: 10, paddingVertical: 4,
+                borderRadius: radius.md, minWidth: 44, alignItems: "center",
+              }}>
+                <Text style={{ color: theme.onBrand, fontWeight: "900", fontSize: fontSize.lg }}>{r.tournament_points}</Text>
+              </View>
+            </View>
+          </View>
+        );
+      })}
       <View style={{ marginTop: spacing.lg, gap: 4 }}>
         <Text style={{ color: theme.onSurfaceSecondary, fontSize: fontSize.xs }}>FW = Fixture Wins · MW = Match Wins · +/- = Points Diff · PTS = Total points scored</Text>
       </View>

@@ -44,7 +44,7 @@ TOKEN_TTL_MIN = 60 * 24 * 7
 
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "shanaygala@gmail.com")
 ADMIN_DEFAULT_PASSWORD = os.environ.get("ADMIN_DEFAULT_PASSWORD", "admin123")
-REFEREE_DEFAULT_PIN = os.environ.get("REFEREE_DEFAULT_PIN", "1234")
+REFEREE_DEFAULT_PIN = os.environ.get("REFEREE_DEFAULT_PIN", "9832")
 
 ROUNDS_PER_FIXTURE = 4
 MATCHES_PER_ROUND = 3
@@ -297,6 +297,12 @@ async def seed_initial() -> None:
             "created_at": now,
         })
         log.info("Seeded referee PIN=%s", REFEREE_DEFAULT_PIN)
+    else:
+        # Rotate the seed referee's PIN to the current default (idempotent on each boot)
+        await users_col.update_one(
+            {"role": "referee", "name": "Referee 1"},
+            {"$set": {"pin_hash": hash_pw(REFEREE_DEFAULT_PIN)}},
+        )
 
     if await teams_col.count_documents({}) == 0:
         for t in SEED_TEAMS:
@@ -444,7 +450,7 @@ async def list_teams():
 
 
 @api.post("/teams")
-async def create_team(body: TeamIn, _: dict = Depends(require_role("admin"))):
+async def create_team(body: TeamIn, _: dict = Depends(require_role("admin", "referee"))):
     team = {"id": str(uuid.uuid4()), "name": body.name, "captain_name": body.captain_name or "",
             "created_at": datetime.now(timezone.utc).isoformat()}
     await teams_col.insert_one(team.copy())
@@ -453,7 +459,7 @@ async def create_team(body: TeamIn, _: dict = Depends(require_role("admin"))):
 
 
 @api.put("/teams/{team_id}")
-async def update_team(team_id: str, body: TeamIn, _: dict = Depends(require_role("admin"))):
+async def update_team(team_id: str, body: TeamIn, _: dict = Depends(require_role("admin", "referee"))):
     res = await teams_col.update_one({"id": team_id},
         {"$set": {"name": body.name, "captain_name": body.captain_name or ""}})
     if res.matched_count == 0:
@@ -463,7 +469,7 @@ async def update_team(team_id: str, body: TeamIn, _: dict = Depends(require_role
 
 
 @api.delete("/teams/{team_id}")
-async def delete_team(team_id: str, _: dict = Depends(require_role("admin"))):
+async def delete_team(team_id: str, _: dict = Depends(require_role("admin", "referee"))):
     await teams_col.delete_one({"id": team_id})
     await players_col.delete_many({"team_id": team_id})
     await hub.broadcast({"type": "teams_changed"})
@@ -480,7 +486,7 @@ async def list_players(team_id: Optional[str] = None):
 
 
 @api.post("/players")
-async def create_player(body: PlayerIn, _: dict = Depends(require_role("admin"))):
+async def create_player(body: PlayerIn, _: dict = Depends(require_role("admin", "referee"))):
     await get_team(body.team_id)
     p = {"id": str(uuid.uuid4()), "name": body.name, "contact": body.contact or "",
          "age": body.age, "category": body.category or "beginner",
@@ -492,7 +498,7 @@ async def create_player(body: PlayerIn, _: dict = Depends(require_role("admin"))
 
 
 @api.put("/players/{player_id}")
-async def update_player(player_id: str, body: PlayerIn, _: dict = Depends(require_role("admin"))):
+async def update_player(player_id: str, body: PlayerIn, _: dict = Depends(require_role("admin", "referee"))):
     res = await players_col.update_one({"id": player_id},
         {"$set": {"name": body.name, "contact": body.contact or "", "age": body.age,
                   "category": body.category or "beginner", "team_id": body.team_id}})
@@ -503,7 +509,7 @@ async def update_player(player_id: str, body: PlayerIn, _: dict = Depends(requir
 
 
 @api.delete("/players/{player_id}")
-async def delete_player(player_id: str, _: dict = Depends(require_role("admin"))):
+async def delete_player(player_id: str, _: dict = Depends(require_role("admin", "referee"))):
     await players_col.delete_one({"id": player_id})
     await hub.broadcast({"type": "teams_changed"})
     return {"ok": True}
@@ -525,7 +531,7 @@ async def get_fixture(fixture_id: str):
 
 
 @api.post("/fixtures")
-async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("admin"))):
+async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("admin", "referee"))):
     if body.team_a_id == body.team_b_id:
         raise HTTPException(400, "Teams must differ")
     await get_team(body.team_a_id)
@@ -564,7 +570,7 @@ async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("ad
 
 
 @api.put("/fixtures/{fixture_id}")
-async def update_fixture(fixture_id: str, body: FixtureUpdate, _: dict = Depends(require_role("admin"))):
+async def update_fixture(fixture_id: str, body: FixtureUpdate, _: dict = Depends(require_role("admin", "referee"))):
     update = {k: v for k, v in body.dict().items() if v is not None}
     if not update:
         raise HTTPException(400, "Nothing to update")
@@ -577,7 +583,7 @@ async def update_fixture(fixture_id: str, body: FixtureUpdate, _: dict = Depends
 
 
 @api.delete("/fixtures/{fixture_id}")
-async def delete_fixture(fixture_id: str, _: dict = Depends(require_role("admin"))):
+async def delete_fixture(fixture_id: str, _: dict = Depends(require_role("admin", "referee"))):
     await fixtures_col.delete_one({"id": fixture_id})
     await matches_col.delete_many({"fixture_id": fixture_id})
     await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})
@@ -682,7 +688,7 @@ async def get_match(match_id: str):
 
 
 @api.put("/matches/{match_id}")
-async def update_match(match_id: str, body: MatchUpdate, _: dict = Depends(require_role("admin"))):
+async def update_match(match_id: str, body: MatchUpdate, _: dict = Depends(require_role("admin", "referee"))):
     update: dict[str, Any] = {}
     for k, v in body.dict().items():
         if v is None:
@@ -883,12 +889,12 @@ async def leaderboard():
 
 # ---------- Referees admin ----------
 @api.get("/referees")
-async def list_referees(_: dict = Depends(require_role("admin"))):
+async def list_referees(_: dict = Depends(require_role("admin", "referee"))):
     return await users_col.find({"role": "referee"}, {"_id": 0, "pin_hash": 0}).to_list(50)
 
 
 @api.post("/referees")
-async def create_referee(body: RefereeCreate, _: dict = Depends(require_role("admin"))):
+async def create_referee(body: RefereeCreate, _: dict = Depends(require_role("admin", "referee"))):
     pin = body.pin.strip()
     if len(pin) != 4 or not pin.isdigit():
         raise HTTPException(400, "PIN must be 4 digits")
@@ -900,7 +906,7 @@ async def create_referee(body: RefereeCreate, _: dict = Depends(require_role("ad
 
 
 @api.delete("/referees/{ref_id}")
-async def delete_referee(ref_id: str, _: dict = Depends(require_role("admin"))):
+async def delete_referee(ref_id: str, _: dict = Depends(require_role("admin", "referee"))):
     await users_col.delete_one({"id": ref_id, "role": "referee"})
     return {"ok": True}
 

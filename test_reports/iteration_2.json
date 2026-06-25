@@ -1,0 +1,31 @@
+{
+  "summary": "PickleScore iteration-2 re-test PASSED on both backend and frontend. Backend: 11/11 pytest in test_picklescore_api.py — health, new PIN 9832 accepted, OLD PIN 1234 rejected (401), admin legacy login still works, REFEREE token now has admin-equivalent permissions on POST /api/teams (200), POST /api/referees (200), DELETE /api/teams/{id} (200), POST /api/fixtures (200), PUT /api/matches/{id} (200), DELETE /api/fixtures/{id} (200); full happy-path (start fixture → start round → assign players → start match → score → pause/score-rejected → resume → finish) completed using referee JWT alone; WebSocket hello/pong + fixture_changed broadcast verified. Frontend (390x844 mobile viewport): /login shows ONLY PIN keypad — no mode-admin/mode-referee tabs, no 'Default PIN' or '1234' hint anywhere on the page; PIN 1234 → login-err 'Invalid PIN'; PIN 9832 → redirects to /admin. Dashboard leaderboard tab is labeled 'Standings' (testID still tab-leaderboard); standings table renders without horizontal overflow at 390px; top-3 ranks shown in gold/silver/bronze pill circles and tournament-points (PTS) shown in solid Volt-Green pills with black text — visible in screenshot. Referee scoring flow (the previously HIGH-priority gap) works end-to-end: tapping a scheduled match-row with no players assigned auto-opens the PlayerPicker showing 6 chips per team (pa-/pb- testIDs), selecting 2+2 and tapping save-players-btn returns to the scoring screen with start-match-btn enabled; start-match-btn → live; score-a-btn increments score-a-value to 1; pause-match-btn disables score buttons (aria-disabled=true) and changes status to paused; resume-match-btn restores live; edit-score-open opens modal with edit-score-a-input/edit-score-b-input/edit-score-save, setting 7/5 updates instantly; finish-match-btn (window.confirm shimmed) completes the match and displays 'TEAM HEET WINS' in completed strip. Real-time WS verified across two tabs — public dashboard updated 2→3 within ~2.5s of an API score call from the second tab.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_picklescore_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Referee role now bypasses every admin-only check (require_role('admin','referee') everywhere). This is the intended elevation per request, but there is no longer any endpoint that is admin-only — consider whether legacy /api/auth/admin/login should be removed since the UI no longer uses it (currently kept for backward compatibility, fine).",
+    "No rate limiting on /api/auth/referee/login — 4-digit PIN brute-force feasible (10k combos). Carry-over from iter-1; still applies.",
+    "console warning on finish: 'GO_BACK was not handled by any navigator' when match completes — non-fatal, but consider router.replace('/admin') instead of router.back() when match was opened via deep-link/refresh."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_picklescore_api.py (rewritten for PIN 9832 + referee-admin equivalence)",
+    "/app/test_reports/iteration_2.json (new)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100% on all flows tested"},
+  "seed_data_creation": "Test created and self-cleaned: 1 TEST_RefTeam (deleted), 1 TEST_RefByRef referee (deleted), 4 transient fixtures on courts 11/12/13 and 30 (all deleted via DELETE /api/fixtures/{id}). Manually cleaned up 2 leftover fixtures (courts 20 and one stray) from intermediate UI runs. No residual seed data remains.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend backend URL env var is EXPO_PUBLIC_BACKEND_URL (NOT EXPO_BACKEND_URL); pytest must be invoked with EXPO_PUBLIC_BACKEND_URL=<host> in env. Referee PIN is now 9832 (old 1234 is rejected). Single referee role has admin-equivalent permissions on every previously admin-only endpoint. Login UI is PIN-keypad only (no mode tabs). Standings tab label is 'Standings' but testID is 'tab-leaderboard'. PlayerPicker auto-shows on /referee/match/{id} when status=scheduled and players are empty. Override window.confirm before clicking finish-match-btn (uses native confirm on web). Direct page.goto(/fixture/{id}) and (/referee/match/{id}) work reliably; clicking nested fixture cards via querySelector_all().click() sometimes triggers 'element not visible' because the parent re-renders — prefer goto by id.",
+  "rca_of_issue": "No bugs found. The previous iteration's HIGH-priority gap (no UI to assign players from referee screen) is fully resolved: tapping a scheduled match row from /fixture/{id} navigates to /referee/match/{id} which auto-renders PlayerPicker when players are unassigned. Selecting 2 chips per team via pa-/pb- testIDs and tapping save-players-btn calls PUT /api/matches/{id} and returns to the scoring view with start-match-btn enabled. Verified end-to-end."
+}

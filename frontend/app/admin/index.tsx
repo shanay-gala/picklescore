@@ -35,7 +35,7 @@ export default function AdminHome() {
   }, []);
 
   useEffect(() => {
-    getUser().then((u) => { if (!u || u.role !== "admin") router.replace("/login"); });
+    getUser().then((u) => { if (!u || (u.role !== "admin" && u.role !== "referee")) router.replace("/login"); });
     load();
   }, [load]);
   useLive(() => load());
