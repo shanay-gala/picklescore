@@ -1,0 +1,35 @@
+{
+  "summary": "Tested PickleScore full-stack (FastAPI + Expo Web). Backend: 17/17 pytest passed covering health, admin/referee auth (positive & negative), seeded 8 teams (6 players each, captain flagged), public endpoints, RBAC (referee forbidden from /teams & /matches POST), full match lifecycle (create -> update players -> start -> score a/b -> undo -> finish), leaderboard accounting (wins/losses/tournament_points), referee admin create+login+delete, and WebSocket /api/ws (hello, ping/pong, match_changed broadcast on score). Frontend: verified public dashboard tabs (Live/Upcoming/Results/Standings), 8-row standings table, theme toggle cycle, admin login -> /admin, create match with team pickers + court + target, edit -> assign 2 players per team, Start (status -> LIVE), logout, referee PIN login via on-screen keypad (1234), match list shows live match, score-a-btn increments score-a-value (3), score-b-btn increments score-b-value (2), undo-btn rolls back last point (b -> 1), finish-btn completes match (window.confirm overridden), public Results tab shows completed match, leaderboard updates winner. REAL-TIME WS CONFIRMED: opened public dashboard in 2nd tab, scored from referee tab, public tab updated from 3-1 to 4-1 within ~2s without reload, and showed match in completed after finish.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Public dashboard /", "issues": ["On 390x844 mobile viewport, the 4th tab 'Standings' is partially clipped on the right edge of the horizontal tab bar (visible as 'Stan...'). Users must horizontally scroll the tab row to fully see/tap it. Consider shorter label, smaller padding, or fitted (non-scroll) layout for 4 tabs on small screens."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_picklescore_api.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Minor: 'Standings' tab gets visually clipped on narrow mobile viewports (~390px). Consider reducing tab horizontal padding or using shorter label so all 4 tabs fit without horizontal scroll. (Functional behavior is fine - scrolling works.)",
+    "Naming consistency note: review_request refers to 'Standings' tab but underlying testID is 'tab-leaderboard' (display label is 'Standings'). No fix required, just be aware for future selector references."
+  ],
+  "critical_code_review_comments": [
+    "server.py is ~800 lines; consider splitting auth/teams/players/matches/ws into separate routers for maintainability.",
+    "JWT_SECRET has a default fallback in code (line 41) - safe for dev but should be required in prod; consider raising if env missing in non-dev.",
+    "Admin email login does case-insensitive lookup then case-sensitive fallback (lines 405-408); since admin is seeded once with lowercased email it works, but the second lookup is dead-code in practice.",
+    "Match score endpoint uses query parameter `side` rather than body - works but unusual; document via OpenAPI param description.",
+    "No rate limiting on /api/auth/referee/login - a 4-digit PIN brute force is feasible (10k combos). Consider adding lockout or rate limit.",
+    "WSHub.broadcast holds lock while awaiting send_json per client which can serialize sends and slow broadcasts under load; acceptable for tournament scale."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_picklescore_api.py (new)",
+    "/app/test_reports/iteration_1.json (new)"
+  ],
+  "success_rate": {"backend": "100% (17/17)", "frontend": "100% on tested flows"},
+  "seed_data_creation": "Tests created 1 completed test match (TEAM HETANKSH vs TEAM PRATIK, score 4-1, status=completed). One extra upcoming match also created and started during admin UI test before being finished by referee. These do not affect future test runs since lifecycle test creates its own match each run. A TEST_Ref referee was created and deleted within the test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend frontend stack uses EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). Standings tab testID is `tab-leaderboard`. Team picker testIDs are `team-a-{id}` / `team-b-{id}`. Player picker testIDs are `pa-{id}` / `pb-{id}`. WebSocket URL is wss://<host>/api/ws and sends `{type:'hello'}` on connect, replies `{type:'pong'}` to text 'ping'. Login page caches last mode in route state; if previous session was admin, the login page may default to admin tab - click `mode-referee` before entering PIN. Use `window.confirm = () => true` before clicking finish-btn since it uses native confirm.",
+  "rca_of_issue": "No bugs found in this iteration."
+}
