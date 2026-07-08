@@ -1,0 +1,148 @@
+{
+  "project_name": "Kurukshetra Picklewave",
+  "theme_strategy": {
+    "default": "dark",
+    "supported": ["light", "dark"],
+    "rationale": "High contrast needed for sports environment (gyms, outdoors). Dark theme is default for elite/performance feel. Light theme uses an emerald tint."
+  },
+  "typography": {
+    "headings": {
+      "family": "Barlow Condensed, sans-serif",
+      "weights": ["700", "900"],
+      "usage": "Used for all scores, team names, and major headings. Creates a heavy-weight, athletic feel."
+    },
+    "body": {
+      "family": "DM Sans, sans-serif",
+      "weights": ["400", "500", "700"],
+      "usage": "Used for data tables, secondary text, and UI labels. High legibility."
+    },
+    "anti_patterns": ["Inter", "Roboto", "Open Sans", "Space Grotesk"],
+    "specific_scales": {
+      "giant_score": "text-7xl md:text-9xl tracking-tighter font-black",
+      "h1": "text-4xl md:text-5xl tracking-tight font-black uppercase",
+      "h2": "text-2xl md:text-3xl tracking-tight font-bold uppercase",
+      "body": "text-base leading-relaxed"
+    }
+  },
+  "colors": {
+    "dark": {
+      "background": "#09090B",
+      "foreground": "#FAFAFA",
+      "primary": "#10B981",
+      "primary_foreground": "#000000",
+      "card": "#18181B",
+      "card_foreground": "#FAFAFA",
+      "border": "#27272A",
+      "accent": "#047857",
+      "destructive": "#EF4444"
+    },
+    "light": {
+      "background": "#F0FDF4",
+      "foreground": "#064E3B",
+      "primary": "#059669",
+      "primary_foreground": "#FFFFFF",
+      "card": "#FFFFFF",
+      "card_foreground": "#064E3B",
+      "border": "#D1FAE5",
+      "accent": "#A7F3D0",
+      "destructive": "#DC2626"
+    }
+  },
+  "visual_enhancers": {
+    "surfaces": "Use The Technical Look: 1px subtle borders, zero soft shadows. Brutalist structure to ensure readability at arm's length.",
+    "glassmorphism": "For sticky bottom navigation, use backdrop-blur-xl with high opacity (bg-background/90) and a subtle top border. DO NOT use completely transparent backgrounds.",
+    "contrast": "Scores must meet absolute maximum contrast. Use bright neon green or pure white on deep black for live scores."
+  },
+  "grids": {
+    "mobile_bento": "High density grid. strict grid hierarchy, compact spacing. grid-cols-1 for mobile, md:grid-cols-2. Use gap-4."
+  },
+  "layouts": {
+    "mobile_first": true,
+    "public_view": {
+      "navigation": "Sticky Bottom Tab Bar (Games, Teams, Standings). Keeps reach zone optimized.",
+      "content": "Dense lists for fixtures. High Density Grid for standing tables."
+    },
+    "referee_view": {
+      "one_handed_controller": "The bottom 60% of the screen must be dedicated to scoring. Split vertically into two massive touch targets (Team A / Team B). No complex gestures. Thumb-zone optimized.",
+      "safe_zone": "Place 'Undo', 'Pause', and 'Complete' at the top 20% of the screen (out of the thumb zone) to prevent accidental taps during rapid scoring."
+    }
+  },
+  "motion": {
+    "interactions": "Fast snaps. Use simple CSS active states for scaling down buttons (active:scale-95) to give tactile feedback when a referee taps +1.",
+    "transitions": "Instant or very quick (150ms). Sports apps need to feel real-time, not sluggish."
+  },
+  "component_name": {
+    "Card": "Flat, rectangular, 1px border. No shadow. Used for fixtures.",
+    "Tabs": "For switching Games/Teams/Standings. Customize to fill width evenly.",
+    "Button": "Pill-shaped or sharp rectangular for athletic feel.",
+    "Dialog": "For referee PIN entry or confirming match completion.",
+    "Sheet": "Bottom sheets for match details (replaces full-screen routing).",
+    "Sonner": "Toasts for 'Score Updated', 'Match Complete'.",
+    "Badge": "For 'LIVE', 'COMPLETED', 'SCHEDULED' statuses.",
+    "Progress": "For visualizing team points to the target score (15).",
+    "Select": "For admin assigning players to matches.",
+    "Input": "For referee PIN or team naming.",
+    "Table": "For Standings tab leaderboard."
+  },
+  "route_map": {
+    "/": "Public Dashboard. Header with 'Kurukshetra Picklewave'. Bottom Tabs: Games (default), Teams, Standings.",
+    "/fixture/:id": "Detailed view of 4 rounds x 3 matches. Running totals.",
+    "/ref": "Hidden route. Shows full-screen 4-digit PIN pad. On success, redirects to /referee.",
+    "/referee": "Referee Dashboard. List of assigned/active fixtures. 'Start Round' buttons.",
+    "/referee/admin": "Admin controls to create fixtures, select players, set teams.",
+    "/referee/match/:id": "LIVE SCORING UI. Top: Current Score. Bottom 60%: Giant +1 tap targets. Top right: Undo. Target score auto-completes at 15."
+  },
+  "accessibility": {
+    "focus_states": "High contrast 2px ring (primary color).",
+    "touch_targets": "Minimum 48x48px for all interactive elements. Scoring buttons must be at least 150x150px."
+  },
+  "media": {
+    "strategy": "Functional relevance. Only use provided image URLs. Do not use placeholder services.",
+    "image_urls": {
+      "hero_background": {
+        "url": "https://images.unsplash.com/photo-1693142517898-2f986215e412",
+        "description": "Person holding a pickleball paddle. Use as a subtle, low-opacity background for the header/hero section with bg-black/80 overlay."
+      }
+    }
+  },
+  "3d_libraries": "None required. Stick to high-performance 2D DOM elements to ensure real-time socket performance.",
+  "data_testing": {
+    "instructions": "All interactive elements MUST include data-testid. Example: data-testid='team-a-score-btn', data-testid='ref-pin-input'."
+  },
+  "steps": [
+    "Initialize React + Tailwind CSS with mobile-first approach",
+    "Add Barlow Condensed and DM Sans fonts",
+    "Implement core layout wrapper with Theme toggle and Sticky Bottom Nav for public routes",
+    "Build the public views: Games List, Teams (with Captain (C)), Standings Leaderboard",
+    "Build the Referee Authentication (/ref) and Dashboard (/referee, /referee/admin)",
+    "Build the One-handed Scoring Controller (/referee/match/:id)",
+    "Integrate WebSocket stubs/mock for real-time state synchronization"
+  ],
+  "instructions_to_main_agent": [
+    "Write code in .js files, NOT .tsx files.",
+    "Strictly follow the color palette. No purple/violet gradients.",
+    "Ensure 'Kurukshetra Picklewave' branding is prominent.",
+    "Implement WebSockets mock/structure so that public state updates when referee clicks score.",
+    "Captain marker (C) must be placed next to player names in Teams list.",
+    "Leaderboard strictly sorted by total tournament points.",
+    "Scoring UI MUST be one-handed optimized (massive buttons, bottom placement)."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "You tend to converge toward generic, 'on distribution' outputs. In frontend design, this creates what users call the 'AI slop' aesthetic. Avoid this: make creative, distinctive frontends that surprise and delight.",
+    "Dark colors look good when used independently without gradients. DO NOT use dark colors as gradients.",
+    "Don't make generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "You MUST NOT apply universal transition. Eg: transition: all. Always add transitions for specific interactive elements excluding transforms.",
+    "You MUST NOT center align the app container. This disrupts the human natural reading flow of text.",
+    "Always use modern button styles like pill-shaped, or sharp button with interaction animations & color relevant to the app style.",
+    "NEVER: use AI assistant Emoji characters like 🤖🧠💭💡🔮🎯 etc for icons.",
+    "Every interaction needs micro-animations - hover states, transitions, parallax effects, and entrance animations.",
+    "Use 2-3x more spacing than feels comfortable. Cramped designs look cheap.",
+    "Subtle grain textures, noise overlays, custom cursors, selection states, and loading animations: separates good from extraordinary.",
+    "Main agent relies on these image URLs. Missing categories = main agent will use placeholder text which is FORBIDDEN.",
+    "Prioritize using pre-existing components from src/components/ui when applicable.",
+    "Use sonner for toasts. Sonner component are located in /app/src/components/ui/sonner.js",
+    "All interactive and key informational elements MUST include a data-testid attribute to facilitate robust automated testing."
+  ]
+}
