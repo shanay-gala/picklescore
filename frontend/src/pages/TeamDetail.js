@@ -61,9 +61,17 @@ export default function TeamDetail() {
 
         <section className="rounded-sm border border-border bg-card p-4">
           <div className="flex items-center gap-4">
-            <span className="grid h-14 w-14 place-items-center rounded-sm bg-primary/15 text-primary display text-2xl font-black">
-              {team.name.slice(0, 2)}
-            </span>
+            <div
+              data-testid="team-rank-crest"
+              className="grid h-14 w-14 shrink-0 place-items-center rounded-sm bg-primary/15 text-primary leading-none"
+            >
+              <div className="text-center">
+                <div className="text-[9px] font-bold uppercase tracking-widest opacity-70 leading-none">Rank</div>
+                <div className="display num-mono text-2xl font-black leading-none mt-0.5">
+                  {rank ? `#${rank.rank}` : "—"}
+                </div>
+              </div>
+            </div>
             <div className="flex-1 min-w-0">
               <div className="display text-3xl font-black uppercase tracking-tight leading-none">
                 {team.name}
@@ -72,12 +80,6 @@ export default function TeamDetail() {
                 Captain · {titleCase(team.captain_name || "—")}
               </div>
             </div>
-            {rank && (
-              <div className="text-right">
-                <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Rank</div>
-                <div className="display num-mono text-3xl font-black text-primary leading-none">#{rank.rank}</div>
-              </div>
-            )}
           </div>
 
           {rank && (
