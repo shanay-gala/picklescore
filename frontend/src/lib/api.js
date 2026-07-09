@@ -51,6 +51,8 @@ export const endpoints = {
   fixtures: () => api.get("/fixtures").then((r) => r.data),
   fixture: (id) => api.get(`/fixtures/${id}`).then((r) => r.data),
   teams: () => api.get("/teams").then((r) => r.data),
+  team: (id) => api.get(`/teams/${id}`).then((r) => r.data),
+  teamMatches: (id) => api.get(`/teams/${id}/matches`).then((r) => r.data),
   leaderboard: () => api.get("/leaderboard").then((r) => r.data),
 
   refereeLogin: (pin) =>

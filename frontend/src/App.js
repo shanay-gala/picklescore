@@ -11,6 +11,7 @@ import RefereeDashboard from "@/pages/RefereeDashboard";
 import RefereeFixture from "@/pages/RefereeFixture";
 import RefereeMatch from "@/pages/RefereeMatch";
 import RefereeAdmin from "@/pages/RefereeAdmin";
+import TeamDetail from "@/pages/TeamDetail";
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
       <Routes>
         <Route path="/" element={<GamesPage />} />
         <Route path="/teams" element={<TeamsPage />} />
+        <Route path="/team/:id" element={<TeamDetail />} />
         <Route path="/standings" element={<StandingsPage />} />
         <Route path="/fixture/:id" element={<FixtureDetail />} />
         <Route path="/ref" element={<RefLogin />} />

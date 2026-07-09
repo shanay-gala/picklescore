@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import AppHeader from "@/components/AppHeader";
 import BottomNav from "@/components/BottomNav";
 import { endpoints } from "@/lib/api";
@@ -16,7 +17,7 @@ export default function StandingsPage() {
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-28 pt-4">
         <h1 className="display text-3xl font-black uppercase tracking-tight">Standings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Sorted by total tournament points (baseline + live).
+          Sorted by total tournament points (baseline + live). Tap a team for matches &amp; squad.
         </p>
 
         <div
@@ -31,10 +32,11 @@ export default function StandingsPage() {
             <span className="text-right">PTS</span>
           </div>
           {rows.map((r) => (
-            <div
+            <Link
               key={r.team_id}
+              to={`/team/${r.team_id}`}
               data-testid={`standing-row-${r.team_name}`}
-              className="grid grid-cols-[42px_1fr_44px_44px_60px] items-center gap-2 border-b border-border/60 px-3 py-3 last:border-b-0"
+              className="grid grid-cols-[42px_1fr_44px_44px_60px] items-center gap-2 border-b border-border/60 px-3 py-3 last:border-b-0 hover:bg-accent/40 transition-colors"
             >
               <span className={`display text-lg font-black num-mono ${r.rank <= 3 ? "text-primary" : "text-muted-foreground"}`}>
                 {r.rank}
@@ -52,7 +54,7 @@ export default function StandingsPage() {
               <span className="text-right display text-xl font-black num-mono">
                 {r.tournament_points}
               </span>
-            </div>
+            </Link>
           ))}
           {rows.length === 0 && (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">

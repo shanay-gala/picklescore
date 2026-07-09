@@ -528,6 +528,87 @@ async def delete_team(team_id: str, _: dict = Depends(require_role("admin", "ref
     return {"ok": True}
 
 
+@api.get("/teams/{team_id}/matches")
+async def team_matches(team_id: str):
+    """Return every match involving this team, enriched with fixture context.
+
+    Sorted newest activity first: completed/live before scheduled, within group by fixture creation.
+    """
+    team = await teams_col.find_one({"id": team_id}, {"_id": 0})
+    if not team:
+        raise HTTPException(404, "Team not found")
+
+    matches = await matches_col.find(
+        {"$or": [{"team_a_id": team_id}, {"team_b_id": team_id}]},
+        {"_id": 0},
+    ).sort([("created_at", 1), ("round_number", 1), ("match_number", 1)]).to_list(2000)
+
+    if not matches:
+        return []
+
+    fixture_ids = list({m["fixture_id"] for m in matches})
+    fixtures = await fixtures_col.find(
+        {"id": {"$in": fixture_ids}}, {"_id": 0}
+    ).to_list(len(fixture_ids))
+    fx_by_id = {f["id"]: f for f in fixtures}
+
+    other_team_ids = {
+        (m["team_b_id"] if m["team_a_id"] == team_id else m["team_a_id"]) for m in matches
+    }
+    others = await teams_col.find(
+        {"id": {"$in": list(other_team_ids)}}, {"_id": 0}
+    ).to_list(len(other_team_ids))
+    name_by_id = {t["id"]: t["name"] for t in others}
+    name_by_id[team_id] = team["name"]
+
+    enriched = []
+    for m in matches:
+        f = fx_by_id.get(m["fixture_id"], {})
+        is_a = m["team_a_id"] == team_id
+        opp_id = m["team_b_id"] if is_a else m["team_a_id"]
+        team_score = m.get("score_a", 0) if is_a else m.get("score_b", 0)
+        opp_score = m.get("score_b", 0) if is_a else m.get("score_a", 0)
+        outcome = "pending"
+        if m.get("status") == "completed":
+            if team_score > opp_score:
+                outcome = "win"
+            elif team_score < opp_score:
+                outcome = "loss"
+            else:
+                outcome = "draw"
+        enriched.append({
+            "match_id": m["id"],
+            "fixture_id": m["fixture_id"],
+            "round_number": m.get("round_number"),
+            "match_number": m.get("match_number"),
+            "status": m.get("status", "scheduled"),
+            "team_name": team["name"],
+            "opponent_name": name_by_id.get(opp_id, "?"),
+            "team_score": team_score,
+            "opponent_score": opp_score,
+            "outcome": outcome,
+            "court_number": f.get("court_number"),
+            "week_number": f.get("week_number"),
+            "fixture_status": f.get("status", "scheduled"),
+        })
+
+    priority = {"live": 0, "completed": 1, "paused": 2, "scheduled": 3}
+    enriched.sort(key=lambda x: (priority.get(x["status"], 9), -(x["round_number"] or 0), -(x["match_number"] or 0)))
+    return enriched
+
+
+@api.get("/teams/{team_id}")
+async def get_team_detail(team_id: str):
+    t = await teams_col.find_one({"id": team_id}, {"_id": 0})
+    if not t:
+        raise HTTPException(404, "Team not found")
+    players = await players_col.find({"team_id": team_id}, {"_id": 0}).sort(
+        [("category", 1), ("is_captain", -1), ("name", 1)]
+    ).to_list(50)
+    t["players"] = players
+    return t
+
+
 # ---------- Players ----------
 @api.get("/players")
 async def list_players(team_id: Optional[str] = None):
