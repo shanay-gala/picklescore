@@ -56,19 +56,23 @@ export default function FixtureDetail() {
               Court {f.court_number} · Wk {f.week_number} · Target {f.target_score}
             </span>
           </div>
-          <div className="mt-4 grid grid-cols-3 items-center gap-3">
-            <TeamHead name={f.team_a_name} />
-            <div className="text-center">
-              <div className="display num-mono text-6xl font-black leading-none">
-                <span className={isLive ? "text-primary" : ""}>{f.total_a}</span>
-                <span className="mx-2 text-muted-foreground">·</span>
-                <span className={isLive ? "text-primary" : ""}>{f.total_b}</span>
+          <div className="mt-5 flex flex-col items-center gap-3">
+            <div className="flex w-full items-center justify-between gap-3">
+              <div className="display text-2xl sm:text-3xl font-black uppercase tracking-tight leading-none">
+                {f.team_a_name}
               </div>
-              <div className="mt-1 text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground">
-                Aggregate score
+              <div className="text-right display text-2xl sm:text-3xl font-black uppercase tracking-tight leading-none">
+                {f.team_b_name}
               </div>
             </div>
-            <TeamHead name={f.team_b_name} align="left" />
+            <div className="display num-mono text-4xl sm:text-5xl font-black leading-none whitespace-nowrap">
+              <span className={isLive ? "text-primary" : ""}>{f.total_a}</span>
+              <span className="mx-3 text-muted-foreground">·</span>
+              <span className={isLive ? "text-primary" : ""}>{f.total_b}</span>
+            </div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.3em] text-muted-foreground">
+              Aggregate score
+            </div>
           </div>
         </section>
 
@@ -79,18 +83,6 @@ export default function FixtureDetail() {
         </div>
       </main>
       <BottomNav />
-    </div>
-  );
-}
-
-function TeamHead({ name, align = "right" }) {
-  return (
-    <div className={align === "right" ? "text-right" : "text-left"}>
-      <div className="grid grid-cols-1 justify-items-stretch">
-        <span className="display text-2xl font-black uppercase tracking-tight leading-none">
-          {name}
-        </span>
-      </div>
     </div>
   );
 }
@@ -149,7 +141,15 @@ function PlayerLine({ players, team, align }) {
         {(players || []).length === 0 ? (
           <span className="text-muted-foreground">—</span>
         ) : (
-          (players || []).map((p) => titleCase(p.name)).join(" · ")
+          (players || []).map((p, idx) => (
+            <span key={p.id}>
+              {idx > 0 && <span className="text-muted-foreground"> · </span>}
+              {titleCase(p.name)}
+              {p.is_captain && (
+                <span className="ml-1 text-[10px] font-bold text-primary">(C)</span>
+              )}
+            </span>
+          ))
         )}
       </div>
     </div>
