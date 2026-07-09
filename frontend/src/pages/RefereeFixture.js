@@ -309,7 +309,7 @@ function RosterSelect({ team, players, selected, onToggle, testPrefix }) {
                 }`}
               >
                 {titleCase(p.name)}
-                {p.is_captain && <span className="ml-1 text-[10px] font-bold text-primary">(C)</span>}
+                {p.is_captain && <span className="ml-1 inline-block rounded-sm bg-primary/15 px-1 text-[11px] font-black uppercase leading-tight text-primary" style={{ fontFeatureSettings: '"case" on' }}>(C)</span>}
                 <span className="ml-1 text-[9px] uppercase tracking-widest">
                   {p.category === "advance" ? "· ADV" : "· BEG"}
                 </span>

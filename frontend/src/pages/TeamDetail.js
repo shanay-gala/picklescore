@@ -210,7 +210,7 @@ function RosterGroup({ label, players, className = "" }) {
             <span className="text-sm">
               {titleCase(p.name)}
               {p.is_captain && (
-                <span className="ml-1.5 text-[10px] font-bold text-primary">(C)</span>
+                <span className="ml-1.5 inline-block rounded-sm bg-primary/15 px-1 text-[11px] font-black uppercase leading-tight text-primary" style={{ fontFeatureSettings: '"case" on' }}>(C)</span>
               )}
             </span>
             <span className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
