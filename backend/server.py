@@ -46,6 +46,7 @@ TOKEN_TTL_MIN = 60 * 24 * 7
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_DEFAULT_PASSWORD = os.environ["ADMIN_DEFAULT_PASSWORD"]
 REFEREE_DEFAULT_PIN = os.environ["REFEREE_DEFAULT_PIN"]
+ADMIN_MAINT_TOKEN = os.environ.get("ADMIN_MAINT_TOKEN", "")
 
 ROUNDS_PER_FIXTURE = 4
 MATCHES_PER_ROUND = 3
@@ -1103,6 +1104,66 @@ async def ws_endpoint(ws: WebSocket):
     except Exception as exc:
         log.warning("WS error: %s", exc)
         await hub.disconnect(ws)
+
+
+# ---------- Maintenance endpoints (token-guarded) ----------
+from fastapi import Header  # noqa: E402
+
+
+def _maint_ok(x_maint_token: Optional[str]) -> None:
+    if not ADMIN_MAINT_TOKEN or x_maint_token != ADMIN_MAINT_TOKEN:
+        raise HTTPException(401, "Missing or invalid maintenance token")
+
+
+@api.get("/admin/backup")
+async def admin_backup(x_maint_token: Optional[str] = Header(None)):
+    _maint_ok(x_maint_token)
+    return {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "teams": await teams_col.find({}, {"_id": 0}).to_list(1000),
+        "players": await players_col.find({}, {"_id": 0}).to_list(5000),
+        "fixtures": await fixtures_col.find({}, {"_id": 0}).to_list(1000),
+        "matches": await matches_col.find({}, {"_id": 0}).to_list(20000),
+        "users": await users_col.find({}, {"_id": 0}).to_list(500),
+    }
+
+
+class RestorePayload(BaseModel):
+    teams: Optional[list[dict]] = None
+    players: Optional[list[dict]] = None
+    fixtures: Optional[list[dict]] = None
+    matches: Optional[list[dict]] = None
+    users: Optional[list[dict]] = None
+    replace: bool = True
+
+
+@api.post("/admin/restore")
+async def admin_restore(
+    payload: RestorePayload,
+    x_maint_token: Optional[str] = Header(None),
+):
+    """Rehydrate collections from a backup payload."""
+    _maint_ok(x_maint_token)
+    summary: dict[str, Any] = {}
+
+    async def _reload(col, docs, key):
+        if docs is None:
+            return
+        if payload.replace:
+            await col.delete_many({})
+        if docs:
+            await col.insert_many([{k: v for k, v in d.items() if k != "_id"} for d in docs])
+        summary[key] = len(docs)
+
+    await _reload(teams_col, payload.teams, "teams")
+    await _reload(players_col, payload.players, "players")
+    await _reload(fixtures_col, payload.fixtures, "fixtures")
+    await _reload(matches_col, payload.matches, "matches")
+    if payload.users is not None:
+        await _reload(users_col, payload.users, "users")
+
+    await hub.broadcast({"type": "teams_changed"})
+    return {"ok": True, "restored": summary}
 
 
 app.include_router(api)
