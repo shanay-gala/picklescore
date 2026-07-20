@@ -1,0 +1,28 @@
+{
+  "summary": "Bug-fix verification for (1) player rename 'pratik m shah' -> 'pratik gada' and (2) referee dashboard + Games page results sort ordering. Both backend and frontend verified. All 7 pytest cases passed (player rename, sort field availability, computed ordering, leaderboard regression, WebSocket hello, new fixture placement in scheduled group). Frontend: Playwright verified Games page RESULTS section is newest-first and Referee dashboard /referee shows exact expected order (SCHEDULED HETANKSH vs HEMIL first, then 7 COMPLETED fixtures sorted by completed_at DESC).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bugfix_iteration2.py",
+    "/app/test_reports/pytest/iteration_2.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Sort logic is duplicated in two places (RefereeDashboard.js lines 84-95 and GamesPage.js lines 33-37). Consider extracting a small util e.g. src/lib/sortFixtures.js so future changes stay in sync.",
+    "GamesPage groups only sorts 'completed' by time; 'live' and 'scheduled' arrays retain the /api/fixtures response order (which is insertion-order). Minor: consider sorting live/upcoming by created_at asc for deterministic UI across sessions."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bugfix_iteration2.py (new)"
+  ],
+  "success_rate": { "backend": "100%", "frontend": "100%" },
+  "test_credentials": "Referee PIN: 9832 (route /ref). Admin: shanaygala@gmail.com / admin123 (API-only, not exercised in UI tests).",
+  "seed_data_creation": "Created and immediately deleted one temporary scheduled fixture (SAMEER vs KIRAN, court 9, target 3) to verify new-fixture placement. No lingering test data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Preview backend is on MongoDB Atlas. Player 'pratik gada' confirmed (contact 9833252526, team PRATIK). No 'pratik m shah' present. Fixtures: 1 scheduled (HETANKSH vs HEMIL wk6 court5) + 7 completed. Referee dashboard visually shows correct order. If retesting, use data-testid ref-fixture-<id> and pin-key-<0-9>. StatusBadge maps 'scheduled' status to UI label 'UPCOMING' - don't be fooled thinking it's a mismatch. Also note 'live' text appears inside '0 live' inside every card, so regex-based status parsing needs care.",
+  "rca of the issue": "N/A - this was a bug-fix verification run and both fixes are confirmed working end-to-end."
+}

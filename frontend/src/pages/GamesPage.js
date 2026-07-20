@@ -30,7 +30,11 @@ export default function GamesPage() {
   const groups = {
     live: fixtures.filter((f) => f.status === "live"),
     scheduled: fixtures.filter((f) => f.status === "scheduled"),
-    completed: fixtures.filter((f) => f.status === "completed"),
+    completed: [...fixtures.filter((f) => f.status === "completed")].sort((a, b) => {
+      const ta = a.completed_at || a.started_at || a.created_at || "";
+      const tb = b.completed_at || b.started_at || b.created_at || "";
+      return tb.localeCompare(ta);
+    }),
   };
 
   return (

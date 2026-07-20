@@ -81,7 +81,19 @@ export default function RefereeDashboard() {
               No fixtures yet. Create one in <Link to="/referee/admin" className="text-primary underline">Admin</Link>.
             </div>
           )}
-          {fixtures.map((f) => (
+          {[...fixtures]
+            .sort((a, b) => {
+              const order = { live: 0, paused: 1, scheduled: 2, completed: 3 };
+              const oa = order[a.status] ?? 9;
+              const ob = order[b.status] ?? 9;
+              if (oa !== ob) return oa - ob;
+              // Within same status, newest-first for completed, oldest-first otherwise
+              const ta = a.completed_at || a.started_at || a.created_at || "";
+              const tb = b.completed_at || b.started_at || b.created_at || "";
+              if (a.status === "completed") return tb.localeCompare(ta);
+              return ta.localeCompare(tb);
+            })
+            .map((f) => (
             <div
               key={f.id}
               data-testid={`ref-fixture-${f.id}`}
