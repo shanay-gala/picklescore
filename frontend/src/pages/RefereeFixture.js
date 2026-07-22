@@ -48,14 +48,22 @@ export default function RefereeFixture() {
   const completeRound = async (rn) => {
     try { await endpoints.completeRound(id, rn); toast.success(`Round ${rn} completed`); } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
-  const startMatch = async (mid) => {
-    try {
-      const started = await endpoints.startMatch(mid);
-      toast.success("Match started");
-      nav(`/referee/match/${mid}`, { state: { match: started } });
-    } catch (e) {
+  const startMatch = (mid, matchObj) => {
+    // Navigate INSTANTLY with an optimistic 'live' state so the scoring UI
+    // renders sub-100ms. Fire the POST /start in the background; the scoring
+    // page will reconcile via its own load() + WebSocket on arrival.
+    const optimistic = {
+      ...matchObj,
+      status: "live",
+      fixture_id: f.id,
+      court_number: f.court_number,
+      team_a_name: f.team_a_name,
+      team_b_name: f.team_b_name,
+    };
+    nav(`/referee/match/${mid}`, { state: { match: optimistic, needsStart: true } });
+    endpoints.startMatch(mid).catch((e) => {
       toast.error(e?.response?.data?.detail || "Cannot start");
-    }
+    });
   };
 
   return (
@@ -162,7 +170,7 @@ export default function RefereeFixture() {
                       </button>
                       {m.status !== "completed" && m.status !== "live" && (
                         <button
-                          onClick={() => startMatch(m.id)}
+                          onClick={() => startMatch(m.id, m)}
                           data-testid={`start-match-${m.id}`}
                           className="inline-flex items-center gap-1 rounded-sm bg-primary px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-primary-foreground tap-feedback"
                         >

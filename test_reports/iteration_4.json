@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 4 retest of Start-Match perceived-speed fix. All 5 flows PASS. PRIMARY: Start Match click -> score-a-btn = 93ms (retested at 39ms in second run) - well under the 300ms budget (previously 2306ms in iteration_3). Nav-first + background POST pattern works as intended. URL correctly changes to /referee/match/{id} instantly with 0-0 score, LIVE badge, and team names/players hydrated from optimistic location.state. SECONDARY race check: clicking score-a-btn within the first ~40ms produced a backend 400 ('must be live'), the doScore() 500ms auto-retry succeeded, and score_a ended at 1 with no persistent error toast. REGRESSION direct-URL entry: /referee/match/{id} without location.state loads and shows score-a-btn correctly. REGRESSION Score-link on live match: 40ms (matches iteration_3 42ms baseline).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/setup_start_match_scenario.py"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "RefereeFixture.startMatch() correctly navigates FIRST with optimistic state and fires endpoints.startMatch() as fire-and-forget (line 51-67). Consider adding a small debounce/guard on the Start Match button to avoid duplicate POSTs if the referee double-taps (currently no busy state on this button - a rapid double-click would fire two /start POSTs; backend handles idempotently by rejecting the second but a UI guard is cleaner).",
+    "RefereeMatch.js useEffect (line 31-35) correctly skips the initial GET when arriving with optimistic state (initial && needsStart). WebSocket reconciles player data within ~2s as designed.",
+    "doScore() auto-retry (line 47-59) uses a regex /must be live/i to detect the race condition and retry after 500ms. This works but is fragile - if backend detail message text ever changes, retry breaks. Suggest returning a stable error code (e.g. 409 with code:'MATCH_NOT_LIVE') and matching on that instead of free-text. Non-blocking.",
+    "location.state.match is used as the initial render source but is not defensively validated - if a caller passes a partially-hydrated object without team_a_players / team_b_players arrays, RefereeMatch line 110 (m.team_a_players || []) already handles it, so fine.",
+    "Console reports one 400 during the race test which is expected (background POST + immediate score click race). This is silently retried and does not surface to the user. Consider suppressing the console.error for the swallowed 400 to keep dev console cleaner (currently comes from axios/api.js interceptor)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only retest)", "frontend": "100% (5/5 checks pass: PRIMARY 93ms, SECONDARY URL+scoreboard+players, RACE retry, REGRESSION direct-URL, REGRESSION Score-link 40ms)"},
+  "test_credentials": "Referee PIN 9832 (route /ref)",
+  "seed_data_creation": "Created 2 scheduled fixtures (SAMEER vs PRATIK, court 10, target 5) via /app/backend/tests/setup_start_match_scenario.py. Both cleaned up (--cleanup) at end of test. No lingering data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Start Match perceived-speed fix is fully working. All 5 review flows verified. No further action needed on this bug. Backend previously verified 100% green in iteration_3. Scenario setup helper at /app/backend/tests/setup_start_match_scenario.py remains useful for future scoring UI tests.",
+  "rca of the issue": "Prior behaviour (iteration_3): RefereeFixture.startMatch() serialised `await endpoints.startMatch(mid)` then `nav()`, adding the full POST round-trip (~2s to Atlas) to the perceived click-to-score-page latency. Fix applied in iteration_4: (a) nav() is now called FIRST with an optimistic `{...matchObj, status:'live', fixture_id, court_number, team_a_name, team_b_name}` location.state so RefereeMatch renders the scoring UI immediately; (b) endpoints.startMatch(mid) fires in the background without await; (c) RefereeMatch skips its normal on-mount GET when initial && needsStart to avoid clobbering the optimistic state, letting the WebSocket push the confirmed state instead; (d) doScore() auto-retries once after 500ms if backend rejects with 'must be live' to handle the race where the user taps score before the background /start POST lands. Measured 93ms (first run) and 39ms (race-test run) - both well under the 300ms budget."
+}

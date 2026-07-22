@@ -12,6 +12,7 @@ export default function RefereeMatch() {
   const nav = useNavigate();
   const location = useLocation();
   const initial = location.state?.match || null;
+  const needsStart = !!location.state?.needsStart;
   const [m, setM] = useState(initial);
   const [busy, setBusy] = useState(false);
 
@@ -24,7 +25,14 @@ export default function RefereeMatch() {
       void err;
     }
   };
-  useEffect(() => { load(); }, [id]);
+  // If we arrived with optimistic state, skip the immediate fetch — the
+  // WebSocket will push the confirmed state once the backend acknowledges
+  // the start (usually 1-2s later). Otherwise fetch immediately.
+  useEffect(() => {
+    if (initial && needsStart) return;  // scoring UI renders instantly, WS reconciles
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
   useLive((msg) => {
     if (!msg) return;
     if (msg.type === "fixture_changed" && msg.match_id && msg.match_id !== id) return;
@@ -34,8 +42,22 @@ export default function RefereeMatch() {
   const doScore = async (side) => {
     if (busy || !m || m.status !== "live") return;
     setBusy(true);
+    const attempt = async () => endpoints.score(id, side);
     try {
-      const updated = await endpoints.score(id, side);
+      let updated;
+      try {
+        updated = await attempt();
+      } catch (e1) {
+        const detail = e1?.response?.data?.detail || "";
+        // Race: user tapped before the background start-match POST landed.
+        // Wait a beat and try once more.
+        if (/must be live/i.test(detail)) {
+          await new Promise((r) => setTimeout(r, 500));
+          updated = await attempt();
+        } else {
+          throw e1;
+        }
+      }
       setM(updated);
       if (updated.status === "completed") {
         toast.success(`${side === "a" ? updated.team_a_name : updated.team_b_name} wins the match`);
