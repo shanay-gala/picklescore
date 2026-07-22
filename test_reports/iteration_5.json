@@ -1,0 +1,66 @@
+{
+  "summary": "Iteration 5 review of new 'Edit match' feature (score + target editing) on /referee/match/{id}. UI shell, all data-testids, direct edits, stepper edits, target edit + live status bar reflow, and +1 regression PASS. Session-expired banner regression PASS. FAIL: backend auto-complete on edit does NOT set winner_team_id or finished_at when frontend sends status='completed' (violates review requirement 6).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "When body sends status='completed' (auto-complete-on-edit path), backend blindly writes status but does NOT derive winner_team_id from scores and does NOT set finished_at. Also does not call _maybe_auto_complete_round / _maybe_auto_complete_fixture. Confirmed: PUT with {score_a:6, score_b:3, target_score:5, status:'completed'} returns match with status='completed' but winner_team_id=null and finished_at=null. This fails review test-case 'Auto-complete on edit' which requires winner_team_id set to team_a. Compare score_point() at server.py:927-935 which does this correctly.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "No validation that score_a/score_b are non-negative; Pydantic MatchUpdate.score_a/score_b accept any int. Frontend clamps to 0 but a direct API caller could set -1. Add Field(ge=0)."
+      },
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "target_score not validated (accepts 0 or negative). Frontend clamps to >=1 but backend does not. Add Field(gt=0)."
+      },
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "status field accepts any string, no enum validation. A referee could PUT status='banana' and it would persist. Should be Literal['scheduled','live','paused','completed']."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Auto-complete on edit",
+        "issue": "Frontend sends only body.status='completed' (RefereeMatch.js:271-275) but never sets winner_team_id. Since backend doesn't derive it either, the completed match has no winner. Either frontend must compute winner_team_id (sa>=tg -> team_a_id else team_b_id) and add it to the PUT body, or backend must derive it. Backend fix is preferable (single source of truth, mirrors /score endpoint logic).",
+        "affected_selectors": ["edit-save"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_edit_match.py",
+    "/app/backend/tests/setup_start_match_scenario.py",
+    "/app/test_reports/pytest/iteration_5.xml"
+  ],
+  "action_items": [
+    "BACKEND FIX (HIGH): In server.py update_match() (line 833), after $set write, if status transitioned to 'completed', derive winner_team_id from scores (team_a_id if score_a>=target OR score_a>score_b when scores>=target-satisfied, else team_b_id) and set finished_at=now. Also call _maybe_auto_complete_round + _maybe_auto_complete_fixture. Alternative: reuse the same terminal-state logic used inside score_point.",
+    "BACKEND HARDENING (minor): Add Pydantic constraints on MatchUpdate — Field(ge=0) on score_a/score_b, Field(gt=0) on target_score, Literal on status.",
+    "FRONTEND (optional, only if backend fix not applied): In RefereeMatch.EditMatchSheet.save(), when auto-completing, compute and send winner_team_id in the PUT body based on which side reached target."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_match() (line 833-849) is a blind field-copy PUT — it accepts score_a/score_b/target_score/status without any invariant enforcement. The score_point() endpoint (line 911) has all the proper terminal-state derivation logic (winner_team_id, finished_at, round/fixture auto-completion). update_match should either delegate to a shared helper or duplicate that logic when status becomes 'completed'.",
+    "RefereeMatch.EditMatchSheet does not disable Save while a WebSocket refresh is racing — a save then a WS-triggered load() can flicker state. Non-blocking.",
+    "MatchUpdate model (server.py:125-131) exposes 'status' as free-form Optional[str]. A malicious/typo'd status value would be persisted, breaking many downstream assumptions (e.g., isLive checks). Should be Literal.",
+    "endpoints.updateMatch() (frontend/lib/api.js:80) always PUTs; consider a debounce/single-flight guard to prevent double-save if user double-taps."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_edit_match.py (new)"
+  ],
+  "success_rate": {
+    "backend": "80% (4/5 backend PUT tests pass; auto-complete winner_team_id derivation fails)",
+    "frontend": "100% (all UI testids present, direct+stepper+target edits, +1 regression, session-expired banner all pass)"
+  },
+  "test_credentials": "Referee PIN 9832 (route /ref); localStorage keys: picklewave.token, picklewave.role='referee', picklewave.name",
+  "seed_data_creation": "Created and torn down 3 test fixtures via /app/backend/tests/setup_start_match_scenario.py (SAMEER vs PRATIK, court 10 & 11). All fixtures deleted at end of run. No lingering data in tournament.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Frontend feature is COMPLETE and working — all data-testids match spec (btn-edit, edit-match-sheet, edit-score-a/b, edit-score-a/b-plus/minus, edit-target, edit-save, edit-close). Direct value input, stepper +/-, target field, and Cancel/Save all work; modal closes on save; UI reflows to 'First to N' after target edit. The single outstanding issue is backend PUT /api/matches/{id} not deriving winner_team_id when status='completed' is sent — fix in server.py update_match() by mirroring the terminal-state logic from score_point() (line 927-935). After the fix, re-run /app/backend/tests/test_edit_match.py — the test_auto_complete_on_edit_sets_winner case should turn green.",
+  "rca of the issue": "PUT /api/matches/{id} in server.py:833 uses a naive `for k,v in body.dict().items(): if v is None: continue; update[k]=v` field-copy pattern. It never inspects the semantic meaning of status='completed' and does not auto-derive winner_team_id or finished_at like the /score endpoint does. Frontend EditMatchSheet.save() (RefereeMatch.js:265-284) correctly detects target-reached and adds status='completed' to the PUT body but expects backend to fill in winner. Fix: in update_match, after applying $set, if resulting doc has status=='completed' and no winner_team_id, derive it: winner = team_a_id if score_a >= target OR (score_a > score_b when both < target but user forces complete) else team_b_id; set finished_at=now(); call _maybe_auto_complete_round(...) and _maybe_auto_complete_fixture(...). Reproduction: PUT {'score_a':6,'score_b':3,'target_score':5,'status':'completed'} → response status='completed', winner_team_id=null (should be team_a_id)."
+}

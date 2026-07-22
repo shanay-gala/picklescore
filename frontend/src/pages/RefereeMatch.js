@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowLeft, Undo2, Pause, Play, Flag } from "lucide-react";
+import { ArrowLeft, Undo2, Pause, Play, Flag, Pencil } from "lucide-react";
 import { endpoints, getRole } from "@/lib/api";
 import { useLive } from "@/lib/useLive";
 import { titleCase } from "@/lib/format";
@@ -15,6 +15,7 @@ export default function RefereeMatch() {
   const needsStart = !!location.state?.needsStart;
   const [m, setM] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   useEffect(() => { if (!getRole()) nav("/ref", { replace: true }); }, [nav]);
 
@@ -31,7 +32,6 @@ export default function RefereeMatch() {
   useEffect(() => {
     if (initial && needsStart) return;  // scoring UI renders instantly, WS reconciles
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   useLive((msg) => {
     if (!msg) return;
@@ -126,6 +126,15 @@ export default function RefereeMatch() {
             <span>R{m.round_number}</span>·<span>M{m.match_number}</span>·<span>Court {m.court_number}</span>·<span>Target {target}</span>
           </div>
           <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setEditOpen(true)}
+              disabled={busy}
+              data-testid="btn-edit"
+              className="inline-flex h-9 items-center gap-1 rounded-sm border border-border bg-card px-2 text-xs font-bold uppercase tracking-widest hover:border-primary/60 disabled:opacity-50"
+              title="Edit score / target"
+            >
+              <Pencil className="h-3.5 w-3.5" /> Edit
+            </button>
             <button
               onClick={doUndo}
               disabled={busy || isDone}
@@ -234,6 +243,145 @@ export default function RefereeMatch() {
             </span>
           )}
         </div>
+      </div>
+
+      {editOpen && (
+        <EditMatchSheet
+          match={m}
+          onClose={() => setEditOpen(false)}
+          onSaved={(updated) => { setM(updated); setEditOpen(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditMatchSheet({ match, onClose, onSaved }) {
+  const [scoreA, setScoreA] = useState(String(match.score_a ?? 0));
+  const [scoreB, setScoreB] = useState(String(match.score_b ?? 0));
+  const [target, setTarget] = useState(String(match.target_score ?? 15));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const sa = Math.max(0, parseInt(scoreA, 10) || 0);
+    const sb = Math.max(0, parseInt(scoreB, 10) || 0);
+    const tg = Math.max(1, parseInt(target, 10) || 15);
+    setSaving(true);
+    try {
+      const body = { score_a: sa, score_b: sb, target_score: tg };
+      // If either side already >= target, auto-complete + set winner
+      if (sa >= tg || sb >= tg) {
+        body.status = "completed";
+      }
+      const updated = await endpoints.updateMatch(match.id, body);
+      toast.success("Match updated");
+      onSaved(updated);
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Failed to save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm"
+      data-testid="edit-match-sheet"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-md rounded-t-sm sm:rounded-sm border border-border bg-card p-4">
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              Edit · R{match.round_number} · M{match.match_number}
+            </div>
+            <h2 className="display text-xl font-black uppercase tracking-tight">
+              Set score & target
+            </h2>
+          </div>
+          <button
+            onClick={onClose}
+            data-testid="edit-close"
+            className="rounded-sm border border-border px-2 py-1 text-xs font-bold uppercase tracking-widest text-muted-foreground hover:text-foreground"
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <ScoreField label={match.team_a_name || "Team A"} value={scoreA} onChange={setScoreA} testid="edit-score-a" />
+          <ScoreField label={match.team_b_name || "Team B"} value={scoreB} onChange={setScoreB} testid="edit-score-b" />
+        </div>
+
+        <div className="mt-4">
+          <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Target score (first team to)
+          </label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={1}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            data-testid="edit-target"
+            className="w-full rounded-sm border border-border bg-background px-3 py-2 text-lg num-mono font-bold"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            If a side already reaches target, match auto-completes on save.
+          </p>
+        </div>
+
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="rounded-sm border border-border bg-card px-3 py-2 text-xs font-bold uppercase tracking-widest"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={save}
+            disabled={saving}
+            data-testid="edit-save"
+            className="rounded-sm bg-primary px-3 py-2 text-xs font-bold uppercase tracking-widest text-primary-foreground tap-feedback disabled:opacity-60"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScoreField({ label, value, onChange, testid }) {
+  const step = (delta) => {
+    const n = Math.max(0, (parseInt(value, 10) || 0) + delta);
+    onChange(String(n));
+  };
+  return (
+    <div>
+      <div className="mb-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground truncate">
+        {label}
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => step(-1)}
+          data-testid={`${testid}-minus`}
+          className="h-11 w-9 rounded-sm border border-border bg-card text-lg font-black tap-feedback hover:border-primary/60"
+        >−</button>
+        <input
+          type="number"
+          inputMode="numeric"
+          min={0}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          data-testid={testid}
+          className="h-11 w-full rounded-sm border border-border bg-background px-2 text-center num-mono text-xl font-black"
+        />
+        <button
+          onClick={() => step(1)}
+          data-testid={`${testid}-plus`}
+          className="h-11 w-9 rounded-sm border border-border bg-card text-lg font-black tap-feedback hover:border-primary/60"
+        >+</button>
       </div>
     </div>
   );
