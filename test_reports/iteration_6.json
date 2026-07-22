@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 6 backend-only retest of auto-complete-on-edit fix (server.py update_match). All 6 review-request scenarios PASS: team_a winner derivation, team_b winner derivation, tied-score (winner_team_id=null, finished_at set, status=completed), full 12-match cascade (round auto-completes on last match of round, fixture auto-completes on last match of last round), idempotency (subsequent PUT of score_a to already-completed match does NOT clobber winner_team_id or finished_at), and regression for POST /score?side=a still auto-completing and cascading. The previously failing test_auto_complete_on_edit_sets_winner in test_edit_match.py now also PASSES.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "Still no Pydantic validation on MatchUpdate: score_a/score_b accept negatives, target_score accepts 0/negative, status accepts any free-form string (should be Literal['scheduled','live','paused','completed']). Same as iteration_5. Non-blocking."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auto_complete_edit.py",
+    "/app/backend/tests/test_edit_match.py"
+  ],
+  "action_items": [
+    "(Optional / non-blocking) Add Field(ge=0) on score_a/score_b, Field(gt=0) on target_score, and Literal on status in MatchUpdate."
+  ],
+  "critical_code_review_comments": [
+    "server.py update_match() (lines 848-867) now correctly mirrors score_point() terminal-state logic — derives winner_team_id from scores, sets finished_at, and cascades _maybe_auto_complete_round + _maybe_auto_complete_fixture. The guard `if m.get('status') == 'completed' and not m.get('winner_team_id')` also guarantees idempotency: subsequent edits to a completed match preserve the original winner and finished_at. Fix is clean and single-responsibility.",
+    "Tie handling: when score_a == score_b, winner remains None but status stays 'completed' and finished_at is set — matches spec.",
+    "Cascade on edit works identically to cascade on +1 tap; no observed divergence between the two completion paths."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auto_complete_edit.py (new)"
+  ],
+  "success_rate": {
+    "backend": "100% (6/6 new tests + previously-red test_auto_complete_on_edit_sets_winner all pass)",
+    "frontend": "not tested (backend-only per review request)"
+  },
+  "test_credentials": "Referee PIN 9832",
+  "seed_data_creation": "Created 5 ad-hoc test fixtures (SAMEER vs PRATIK, courts 12-15, target 3-5) during test runs; all deleted at end of each test. One leftover fixture on court 14 (from a previous timed-out run) was manually cleaned up post-run. Verified no residual tournament data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Auto-complete-on-edit fix is complete and verified end-to-end. The full suite tests are slow because they exercise real HTTP + real fixture lifecycles (~40-170s per class). If re-running, prefer running the cascade test in isolation (it takes ~2m45s due to 12-match walk-through). All scenarios from iteration_5's failing HIGH-priority item are now green. Only remaining item is optional Pydantic hardening on MatchUpdate.",
+  "rca of the issue": "Original iteration_5 bug was a naive field-copy PUT that never derived winner_team_id or cascaded round/fixture completion when status='completed' was sent. Fix in server.py update_match() lines 848-867 adds a post-update block: if the resulting doc has status=='completed' and no winner_team_id, derive winner (team_a_id if score_a>score_b, team_b_id if score_b>score_a, else None for ties), set finished_at, and call _maybe_auto_complete_round + _maybe_auto_complete_fixture. The `not m.get('winner_team_id')` guard also gives idempotency for free — subsequent PUTs to already-completed matches never overwrite the winner. Verified across all 6 review scenarios."
+}

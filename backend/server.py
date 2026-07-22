@@ -844,7 +844,28 @@ async def update_match(match_id: str, body: MatchUpdate, _: dict = Depends(requi
     res = await matches_col.update_one({"id": match_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Match not found")
+
     m = await matches_col.find_one({"id": match_id}, {"_id": 0})
+
+    # If this edit put the match into 'completed', derive winner + finished_at
+    # and cascade round/fixture completion (mirrors score_point logic).
+    if m.get("status") == "completed" and not m.get("winner_team_id"):
+        sa = m.get("score_a", 0)
+        sb = m.get("score_b", 0)
+        winner = None
+        if sa > sb:
+            winner = m["team_a_id"]
+        elif sb > sa:
+            winner = m["team_b_id"]
+        finish_update: dict[str, Any] = {
+            "winner_team_id": winner,
+            "finished_at": m.get("finished_at") or datetime.now(timezone.utc).isoformat(),
+        }
+        await matches_col.update_one({"id": match_id}, {"$set": finish_update})
+        m.update(finish_update)
+        await _maybe_auto_complete_round(m["fixture_id"], m["round_number"])
+        await _maybe_auto_complete_fixture(m["fixture_id"])
+
     await hub.broadcast({"type": "fixture_changed", "fixture_id": m["fixture_id"], "match_id": match_id})
     return await get_match(match_id)
 
