@@ -41,7 +41,7 @@ DB_NAME = os.environ.get("DB_NAME", "picklescore")
 
 JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALG = "HS256"
-TOKEN_TTL_MIN = 60 * 24 * 7
+TOKEN_TTL_MIN = 60 * 24 * 30  # 30 days — practical for a multi-week tournament
 
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_DEFAULT_PASSWORD = os.environ["ADMIN_DEFAULT_PASSWORD"]
@@ -808,11 +808,21 @@ async def get_match(match_id: str):
     m = await matches_col.find_one({"id": match_id}, {"_id": 0})
     if not m:
         raise HTTPException(404, "Match not found")
-    f = await fixtures_col.find_one({"id": m["fixture_id"]}, {"_id": 0})
-    res = await hydrate_match(m)
+    f_task = fixtures_col.find_one({"id": m["fixture_id"]}, {"_id": 0})
+    pa_task = players_col.find(
+        {"id": {"$in": m.get("team_a_player_ids", [])}}, {"_id": 0}
+    ).to_list(10)
+    pb_task = players_col.find(
+        {"id": {"$in": m.get("team_b_player_ids", [])}}, {"_id": 0}
+    ).to_list(10)
+    f, pa, pb = await asyncio.gather(f_task, pa_task, pb_task)
+    res = {k: v for k, v in m.items() if k != "_id"}
+    res["team_a_players"] = pa
+    res["team_b_players"] = pb
     if f:
-        a = await teams_col.find_one({"id": f["team_a_id"]}, {"_id": 0})
-        b = await teams_col.find_one({"id": f["team_b_id"]}, {"_id": 0})
+        ta_task = teams_col.find_one({"id": f["team_a_id"]}, {"_id": 0})
+        tb_task = teams_col.find_one({"id": f["team_b_id"]}, {"_id": 0})
+        a, b = await asyncio.gather(ta_task, tb_task)
         res["team_a_name"] = a["name"] if a else "?"
         res["team_b_name"] = b["name"] if b else "?"
         res["court_number"] = f.get("court_number", 1)
