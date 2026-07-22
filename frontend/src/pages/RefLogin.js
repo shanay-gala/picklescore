@@ -1,19 +1,32 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { Delete } from "lucide-react";
-import { endpoints, setAuth, getRole } from "@/lib/api";
+import { endpoints, setAuth, getToken, clearAuth } from "@/lib/api";
 import ThemeToggle from "@/components/ThemeToggle";
 
 export default function RefLogin() {
   const nav = useNavigate();
+  const [params] = useSearchParams();
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
+  const expired = params.get("expired") === "1";
 
   useEffect(() => {
-    if (getRole() === "referee" || getRole() === "admin") {
-      nav("/referee", { replace: true });
-    }
+    // Only auto-redirect if the stored token actually works. If it's stale,
+    // clear it silently so the user can just enter their PIN.
+    let cancelled = false;
+    const t = getToken();
+    if (!t) return () => { cancelled = true; };
+    endpoints.auth_me()
+      .then((me) => {
+        if (cancelled) return;
+        if (me?.role === "referee" || me?.role === "admin") {
+          nav("/referee", { replace: true });
+        }
+      })
+      .catch(() => { clearAuth(); });
+    return () => { cancelled = true; };
   }, [nav]);
 
   const submit = async (finalPin) => {
@@ -61,6 +74,15 @@ export default function RefLogin() {
             Enter PIN
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">4-digit referee code</p>
+
+          {expired && (
+            <div
+              data-testid="session-expired-banner"
+              className="mx-auto mt-4 max-w-xs rounded-sm border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-widest text-amber-500"
+            >
+              Session expired — please re-enter your PIN
+            </div>
+          )}
 
           <div className="mt-6 flex items-center justify-center gap-3" data-testid="pin-display">
             {[0, 1, 2, 3].map((i) => (

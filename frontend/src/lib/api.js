@@ -38,9 +38,17 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (r) => r,
   (err) => {
-    if (err?.response?.status === 401) {
-      // Only clear on auth-only routes
-      // Do not force navigation here; components will decide
+    const status = err?.response?.status;
+    const url = err?.config?.url || "";
+    // Force logout on ANY 401 from protected referee/admin endpoints.
+    // Skip login endpoints (they naturally 401 on bad PIN without meaning the
+    // stored session is stale).
+    const isLoginCall = url.includes("/auth/admin/login") || url.includes("/auth/referee/login");
+    if (status === 401 && !isLoginCall) {
+      clearAuth();
+      if (typeof window !== "undefined" && window.location.pathname.startsWith("/referee")) {
+        window.location.replace("/ref?expired=1");
+      }
     }
     return Promise.reject(err);
   }
@@ -55,6 +63,7 @@ export const endpoints = {
   teamMatches: (id) => api.get(`/teams/${id}/matches`).then((r) => r.data),
   leaderboard: () => api.get("/leaderboard").then((r) => r.data),
 
+  auth_me: () => api.get("/auth/me").then((r) => r.data),
   refereeLogin: (pin) =>
     api.post("/auth/referee/login", { pin }).then((r) => r.data),
 

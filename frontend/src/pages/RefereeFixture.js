@@ -49,7 +49,13 @@ export default function RefereeFixture() {
     try { await endpoints.completeRound(id, rn); toast.success(`Round ${rn} completed`); } catch (e) { toast.error(e?.response?.data?.detail || "Failed"); }
   };
   const startMatch = async (mid) => {
-    try { await endpoints.startMatch(mid); toast.success("Match started"); } catch (e) { toast.error(e?.response?.data?.detail || "Cannot start"); }
+    try {
+      const started = await endpoints.startMatch(mid);
+      toast.success("Match started");
+      nav(`/referee/match/${mid}`, { state: { match: started } });
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Cannot start");
+    }
   };
 
   return (
@@ -166,6 +172,7 @@ export default function RefereeFixture() {
                       {(m.status === "live" || m.status === "paused") && (
                         <Link
                           to={`/referee/match/${m.id}`}
+                          state={{ match: { ...m, fixture_id: f.id, court_number: f.court_number, team_a_name: f.team_a_name, team_b_name: f.team_b_name } }}
                           data-testid={`score-match-${m.id}`}
                           className="inline-flex items-center gap-1 rounded-sm bg-primary px-2.5 py-1.5 text-[11px] font-bold uppercase tracking-widest text-primary-foreground tap-feedback"
                         >

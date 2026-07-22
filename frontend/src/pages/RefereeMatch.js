@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ArrowLeft, Undo2, Pause, Play, Flag } from "lucide-react";
 import { endpoints, getRole } from "@/lib/api";
@@ -10,7 +10,9 @@ import ThemeToggle from "@/components/ThemeToggle";
 export default function RefereeMatch() {
   const { id } = useParams();
   const nav = useNavigate();
-  const [m, setM] = useState(null);
+  const location = useLocation();
+  const initial = location.state?.match || null;
+  const [m, setM] = useState(initial);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { if (!getRole()) nav("/ref", { replace: true }); }, [nav]);
@@ -59,8 +61,22 @@ export default function RefereeMatch() {
   };
 
   if (!m) return (
-    <div className="min-h-[100dvh] flex items-center justify-center text-sm text-muted-foreground">
-      Loading match…
+    <div className="min-h-[100dvh] flex flex-col bg-background no-select">
+      <div className="border-b border-border bg-background/95 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-2 px-3 py-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            Loading match…
+          </span>
+        </div>
+      </div>
+      <div className="grid flex-1 grid-cols-2 animate-pulse">
+        <div className="border-r border-border bg-muted/40 flex items-center justify-center">
+          <div className="display num-mono text-8xl font-black leading-none text-muted-foreground/30">0</div>
+        </div>
+        <div className="bg-muted/40 flex items-center justify-center">
+          <div className="display num-mono text-8xl font-black leading-none text-muted-foreground/30">0</div>
+        </div>
+      </div>
     </div>
   );
 
