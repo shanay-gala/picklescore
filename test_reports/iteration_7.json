@@ -1,0 +1,19 @@
+{
+  "summary": "Verified S2 baseline-reset + BASELINE_POINTS code removal on preview. All 12 S2 teams have bonus_points=0 both before and AFTER backend restart, confirming no re-seeding. Full end-to-end fixture flow (create → start → start round → assign players → start match → 3 pts to team_a) confirmed leaderboard updated correctly (+3 tournament_points for DEVEN). Test fixture deleted at end; leaderboard back to all-zero. UI /standings renders 12 rows sorted by PTS desc with no phantom bonus. Row click navigates to /team/{id}; both MATCHES and SQUAD tabs render correctly.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 1199 lines — approaching the >700 threshold; consider splitting into routers (teams, fixtures, matches, admin) modules.",
+    "POST /api/matches/{id}/score takes 'side' as a query parameter while the frontend/referee UI likely posts JSON. Not a bug per current UI (working) but worth documenting — some ad-hoc/test clients (including tests) may pass it in the body and get 422."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Referee PIN 9832 (used successfully).",
+  "seed_data_creation": "Created 1 test fixture (DEVEN vs DHEER, id 97e243d4-e264-4599-8e8f-3cbf4e865a2b) and deleted at end of test. No residual data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Preview backend uses Atlas cluster0.awe5jm0. `grep BASELINE_POINTS server.py` returns 0 matches. Leaderboard endpoint: GET /api/leaderboard (public). Score endpoint uses query param: POST /api/matches/{id}/score?side=a|b. Match ID must be fetched via GET /api/fixtures/{fid} → rounds[].matches[].",
+  "rca of the issue": "Old seed_initial() in server.py contained a BASELINE_POINTS map keyed by team_name. Because five S2 teams shared names with S1 (HEMIL, URVIL, SIDDHARTH, HETANKSH, PRATIK), on backend restart the seed re-applied S1 baseline bonus_points to those S2 teams causing phantom PTS in /api/leaderboard. Mitigation: (a) BASELINE_POINTS block removed from server.py (verified via grep), (b) data restored via POST /api/admin/restore setting bonus_points=0 for all 12 teams. Verified persistence across a supervisorctl restart backend — no team re-acquired an S1 baseline."
+}
