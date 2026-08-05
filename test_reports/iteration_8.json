@@ -1,0 +1,19 @@
+{
+  "summary": "Verified fixture-dedup fix on preview. Created pytest regression suite /app/backend/tests/test_fixture_dedup.py — 6/6 tests pass: (1) GET /api/fixtures returns list; (2) no 'scheduled' fixture shares (pair, week) with a 'completed' one; (3) leaderboard MP == 12 * completed_count per team; (4) fresh preview state confirmed — all 12 teams PTS=0 MP=0 bonus=0; (5) DELETE /api/fixtures/{id} without auth returns 401/403; (6) create → verify 12 matches → delete → GET returns 404 (cascade confirmed). UI: Home page shows LIVE=0, UPCOMING=0, RESULTS=0 (no contradictory data). /standings renders exactly 12 rows sorted alphabetically by name (all tied at 0 PTS) with MP=0 MW=0 PTS=0 for every team.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/test_fixture_dedup.py", "/app/test_reports/pytest/iteration_8.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fixture-creation endpoint currently allows creating a new 'scheduled' fixture even if an identical (team_a, team_b, week) 'completed' fixture already exists. Consider adding a server-side guard or unique-index (team_a_id, team_b_id, week) with sorted pair — this would have prevented the production duplicates altogether. Alternatively, warn/confirm in the UI when the pair already played that week.",
+    "GamesPage.js groups by status, which is correct — but there is no server-side filter that hides orphan 'scheduled' rows in the presence of an equivalent 'completed' one. A defensive filter (frontend or backend) would harden against future manual DB fat-fingers."
+  ],
+  "updated_files": ["/app/backend/tests/test_fixture_dedup.py"],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "Referee PIN 9832 used successfully.",
+  "seed_data_creation": "One test fixture (DEVEN vs DHEER, week=99) created and deleted at end of run — no residual data. Confirmed cascade also removed the 12 matches.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Leaderboard entries use 'team_id'/'team_name' (not id/name). Fixture pair-dedup regression lives at /app/backend/tests/test_fixture_dedup.py — reuse for future data-cleanup verifications.",
+  "rca of the issue": "Two 'scheduled' fixtures were mistakenly created in production for pairs KEVIN-vs-SIDDHARTH and DEVEN-vs-PRATIK during the same Week 5 in which their real fixtures were completed. GET /api/fixtures returned both the completed and scheduled entries; frontend GamesPage.js grouped them by status independently — so UPCOMING showed 2 pending while Standings (fed from completed matches) correctly showed points. Mitigation (already applied by main agent): DELETE /api/fixtures/{id} on the two duplicate scheduled rows. Preventive suggestion in code_review_comments — add server-side uniqueness on (sorted_pair, week)."
+}
