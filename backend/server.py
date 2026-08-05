@@ -289,13 +289,6 @@ async def seed_initial() -> None:
         {"$set": {"week_number": TOURNAMENT_START_WEEK}},
     )
 
-    BASELINE_POINTS = {
-        "HEET": 634, "KIRAN": 609, "HEMIL": 609, "URVIL": 595,
-        "SIDDHARTH": 588, "HETANKSH": 582, "SAMEER": 546, "PRATIK": 545,
-    }
-    for tname, pts in BASELINE_POINTS.items():
-        await teams_col.update_one({"name": tname}, {"$set": {"bonus_points": pts}})
-
     if not await users_col.find_one({"email": ADMIN_EMAIL, "role": "admin"}):
         await users_col.insert_one({
             "id": str(uuid.uuid4()),

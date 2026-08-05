@@ -22,7 +22,7 @@ export default function TeamsPage() {
       <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-28 pt-4">
         <h1 className="display text-3xl font-black uppercase tracking-tight">Teams</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Eight squads. Six players each. One tournament.
+          Twelve squads. Six players each. One tournament.
         </p>
 
         <div className="mt-5 grid gap-3">
