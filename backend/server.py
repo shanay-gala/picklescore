@@ -51,7 +51,7 @@ ADMIN_MAINT_TOKEN = os.environ.get("ADMIN_MAINT_TOKEN", "")
 ROUNDS_PER_FIXTURE = 4
 MATCHES_PER_ROUND = 3  # default; per-round overrides below
 MATCHES_PER_ROUND_MAP = {1: 3, 2: 3, 3: 4, 4: 3}  # Round 3 has 4 matches (rest 3)
-TOURNAMENT_START_WEEK = 5
+TOURNAMENT_START_WEEK = 1
 
 logging.basicConfig(
     level=logging.INFO,
