@@ -49,7 +49,8 @@ REFEREE_DEFAULT_PIN = os.environ["REFEREE_DEFAULT_PIN"]
 ADMIN_MAINT_TOKEN = os.environ.get("ADMIN_MAINT_TOKEN", "")
 
 ROUNDS_PER_FIXTURE = 4
-MATCHES_PER_ROUND = 3
+MATCHES_PER_ROUND = 3  # default; per-round overrides below
+MATCHES_PER_ROUND_MAP = {1: 3, 2: 3, 3: 4, 4: 3}  # Round 3 has 4 matches (rest 3)
 TOURNAMENT_START_WEEK = 5
 
 logging.basicConfig(
@@ -680,7 +681,7 @@ async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("ad
     }
     await fixtures_col.insert_one(fixture.copy())
     for r in range(1, ROUNDS_PER_FIXTURE + 1):
-        for mn in range(1, MATCHES_PER_ROUND + 1):
+        for mn in range(1, MATCHES_PER_ROUND_MAP.get(r, MATCHES_PER_ROUND) + 1):
             await matches_col.insert_one({
                 "id": str(uuid.uuid4()),
                 "fixture_id": fid,
@@ -741,7 +742,7 @@ async def complete_fixture(fixture_id: str, _: dict = Depends(require_role("admi
         raise HTTPException(404, "Fixture not found")
     incomplete = await matches_col.count_documents({"fixture_id": fixture_id, "status": {"$ne": "completed"}})
     if incomplete > 0:
-        raise HTTPException(400, f"{incomplete} match(es) still pending. Finish all 12 matches before completing the fixture.")
+        raise HTTPException(400, f"{incomplete} match(es) still pending. Finish all matches before completing the fixture.")
     await fixtures_col.update_one(
         {"id": fixture_id},
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat()}},
@@ -883,8 +884,11 @@ async def start_match(match_id: str, _: dict = Depends(require_role("admin", "re
     })
     if other_live > 0:
         raise HTTPException(400, "Another match in this fixture is already live. Pause or finish it first.")
-    if (len(m.get("team_a_player_ids", [])) != 2 or len(m.get("team_b_player_ids", [])) != 2):
-        raise HTTPException(400, "Assign 2 players to each team before starting the match")
+    if (
+        len(m.get("team_a_player_ids", [])) not in (1, 2)
+        or len(m.get("team_b_player_ids", [])) not in (1, 2)
+    ):
+        raise HTTPException(400, "Assign 1 or 2 players to each team before starting the match")
     await matches_col.update_one(
         {"id": match_id},
         {"$set": {"status": "live", "started_at": m.get("started_at") or datetime.now(timezone.utc).isoformat()}},

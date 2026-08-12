@@ -251,7 +251,7 @@ function AssignSheet({ match, teamAName, teamBName, playersA, playersB, target, 
               Assign players · R{match.round_number} · M{match.match_number}
             </div>
             <h2 className="display text-xl font-black uppercase tracking-tight">
-              Pick 2 per side
+              Pick 1 or 2 per side
             </h2>
           </div>
           <button
@@ -307,7 +307,7 @@ function RosterSelect({ team, players, selected, onToggle, testPrefix }) {
   return (
     <div>
       <div className="mb-1.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-        {team} · {selected.length}/2
+        {team} · {selected.length}/2 max
       </div>
       <ul className="grid gap-1.5">
         {players.map((p) => {
