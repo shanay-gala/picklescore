@@ -1,0 +1,39 @@
+{
+  "summary": "Backend-only invariant regression on preview (https://courtroom-stream.preview.emergentagent.com) for the two production data edits. New suite /app/backend/tests/test_edit_invariants.py (10 tests, 9 pass / 1 fail). VERIFIED: (a) PUT /api/players/{id} rename preserves is_captain (tested on both a temp player and a real seeded captain, restored afterwards); (b) PUT /api/matches/{id} with only score_b on an already-completed match keeps status='completed', winner_team_id and finished_at byte-identical (3-0 -> 3-1, winner stayed team_a); (c) leaderboard cascade math exact — points_for/points_against/tournament_points/points_diff moved by exactly the edited delta, reverted exactly when score edited back to 0, never negative; fixture total_a/total_b and every round total_a/total_b equal the sum of their match scores. FAILED (real defect): PUT /api/players/{id} sent with only name+team_id silently resets category to 'beginner', contact to '' and age to null, because PlayerIn has defaults and update_player unconditionally $sets all five fields. Preview state restored: 0 fixtures, 12 teams, 72 players, all leaderboard rows zeroed, all TEST_ data deleted.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "PUT /api/players/{id}", "issue": "Non-partial update: PlayerIn defaults (category='beginner', contact='', age=None) are always $set, so a request carrying only {name, team_id} wipes category/contact/age. Reproduced: player created with category='advance', contact='1234567890', age=41 -> after PUT {name,team_id} it became category='beginner', contact='', age=null. Directly relevant to production edit #1 (Harshil Gala -> Harshil Shah on HEMIL with category='advance'): if that PUT omitted category/contact/age, the player's category was silently downgraded to 'beginner'. Please verify Harshil Shah's category/contact/age on production and make update_player partial ($set only provided fields / exclude_unset).", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PUT /api/matches/{id}", "issue": "server.py:846 guard `status=='completed' and not winner_team_id` means an edit that flips which side is higher on an already-completed match keeps the stale winner_team_id (and finished_at). Correct for the requested edit (3-12 -> 3-11 keeps HETANKSH), but a future score correction that crosses over will leave an inconsistent winner. Consider recomputing winner from scores whenever score_a/score_b are in the request body."},
+      {"endpoint": "PUT /api/matches/{id}", "issue": "No validation that scores are >= 0 or <= target_score; a negative score_b would be accepted and would corrupt leaderboard totals (not exercised as a data change, flagged from code review)."},
+      {"endpoint": "POST /api/fixtures/{id}/complete", "issue": "Still open from iteration_9: error text hardcodes 'Finish all 12 matches' while fixtures now have 13."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_edit_invariants.py",
+    "/app/test_reports/pytest/iteration_10.xml"
+  ],
+  "action_items": [
+    "Make PUT /api/players/{id} a partial update (use body.dict(exclude_unset=True) or a PlayerUpdate model with all-optional fields) so omitted fields are not reset.",
+    "Verify on production that Harshil Shah (team HEMIL) still has category='advance' and his original contact/age after the rename; re-apply if wiped.",
+    "(Optional) Recompute winner_team_id in update_match when score_a/score_b are supplied and the leader flips.",
+    "(Optional) Fix stale 'Finish all 12 matches' message."
+  ],
+  "critical_code_review_comments": [
+    "server.py:629-636 update_player() unconditionally $sets name/contact/age/category/team_id from a request model with defaults -> data loss on partial PUT. is_captain is correctly untouched.",
+    "server.py:826-864 update_match() builds $set only from non-None fields, so partial score edits are safe; completion block only fires when winner_team_id is unset -> idempotent as designed.",
+    "server.py:1030-1093 leaderboard() derives everything from live match rows, so score edits cascade immediately; verified arithmetic exact for both teams.",
+    "server.py:929 score endpoint takes `side` as a required query param (POST /api/matches/{id}/score?side=a) — note for future test authors.",
+    "server.py is 1202 lines — approaching the 700-line guidance; consider splitting routers (teams/players/fixtures/matches/leaderboard)."
+  ],
+  "updated_files": ["/app/backend/tests/test_edit_invariants.py"],
+  "success_rate": {"backend": "90% (9/10)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Ephemeral: 4 fixtures on court_number=9 (target_score=3) + 2 TEST_ players; all deleted. One seeded captain temporarily renamed with ' TEST' suffix and restored (name + is_captain + category verified back to original).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Referee PIN 9832 via POST /api/auth/referee/login (access_token as Bearer) — works.",
+  "context_for_next_testing_agent": "Run new suite serially: `python -m pytest tests/test_edit_invariants.py -n 0`. Note pytest.ini forces -n 2 --dist loadscope which races on the shared leaderboard totals, so use -n 0 for any leaderboard math tests. Fixture create returns matches nested under rounds[].matches (no top-level 'matches' key). Scoring is POST /api/matches/{id}/score?side=a|b. Test fixtures use court_number=9 as a cleanup marker.",
+  "rca_of_the_issue": "update_player() writes every field of PlayerIn on each PUT; PlayerIn declares contact='' , age=None, category='beginner' as defaults, so any client omitting them overwrites stored values with defaults. Fix: switch to an all-Optional update model and $set only fields present in the request (exclude_unset=True)."
+}

@@ -110,6 +110,14 @@ class PlayerIn(BaseModel):
     team_id: str
 
 
+class PlayerUpdate(BaseModel):
+    name: Optional[str] = None
+    contact: Optional[str] = None
+    age: Optional[int] = None
+    category: Optional[str] = None
+    team_id: Optional[str] = None
+
+
 class FixtureCreate(BaseModel):
     team_a_id: str
     team_b_id: str
@@ -626,10 +634,11 @@ async def create_player(body: PlayerIn, _: dict = Depends(require_role("admin", 
 
 
 @api.put("/players/{player_id}")
-async def update_player(player_id: str, body: PlayerIn, _: dict = Depends(require_role("admin", "referee"))):
-    res = await players_col.update_one({"id": player_id},
-        {"$set": {"name": body.name, "contact": body.contact or "", "age": body.age,
-                  "category": body.category or "beginner", "team_id": body.team_id}})
+async def update_player(player_id: str, body: PlayerUpdate, _: dict = Depends(require_role("admin", "referee"))):
+    update = {k: v for k, v in body.dict(exclude_unset=True).items() if v is not None}
+    if not update:
+        raise HTTPException(400, "No fields to update")
+    res = await players_col.update_one({"id": player_id}, {"$set": update})
     if res.matched_count == 0:
         raise HTTPException(404, "Player not found")
     await hub.broadcast({"type": "teams_changed"})

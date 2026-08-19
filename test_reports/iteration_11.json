@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only verification of the PUT /api/players/{id} partial-update fix (new PlayerUpdate all-Optional model + exclude_unset $set). Wrote a new dedicated suite (9 tests, all PASS) covering name-only, category-only, team_id-only partial PUTs, empty body -> 400, all-null body -> 400, full-body PUT backward compatibility, is_captain preservation on a real seeded captain, 404 on unknown player, and 401/403 without auth. Also re-ran iteration_10's test_edit_invariants.py: the previously failing test_partial_update_resets_unspecified_fields now PASSES, confirming the data-loss bug is fixed. Preview data verified clean afterwards: 12 teams, 72 players, 12 captains, zero TEST_ leftovers.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/players/{id}", "issue": "No referential validation on team_id — PUT {\"team_id\":\"nonexistent-team\"} returns 200 and orphans the player (player disappears from every team roster). Same gap exists on POST /api/players."},
+      {"endpoint": "PUT /api/players/{id}", "issue": "category accepts arbitrary strings (e.g. 'wizard') -> 200. No enum/Literal validation on PlayerIn/PlayerUpdate."},
+      {"endpoint": "PUT /api/players/{id}", "issue": "name accepts empty string ('' is not None so it passes the None-filter) -> player renamed to blank. Add min_length=1 / strip validation."},
+      {"endpoint": "PUT /api/players/{id}", "issue": "By design of the None-filter, a field can never be explicitly cleared (e.g. set contact back to null). Acceptable for now but worth documenting."},
+      {"endpoint": "PUT /api/teams/{id}", "issue": "Still uses non-partial TeamIn — same reset-on-omit class of bug as the player fix. Out of scope this iteration but should be converted to a TeamUpdate model."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_player_partial_update.py",
+    "/app/test_reports/pytest/iter11_partial_put.xml",
+    "/app/test_reports/pytest/iter11_edit_invariants.xml"
+  ],
+  "action_items": [
+    "Optional hardening: validate team_id existence (404 if team not found) and constrain category to a Literal set on PlayerIn/PlayerUpdate; reject blank name.",
+    "Convert PUT /api/teams/{id} from TeamIn to a partial TeamUpdate model to avoid the same silent-reset bug.",
+    "Test-infra: test_edit_invariants.py::TestLeaderboardCascade is flaky under pytest-xdist parallel workers (leaderboard is shared global state mutated by two workers). Passes 100% when run in isolation. Consider xdist_group/serial marker."
+  ],
+  "critical_code_review_comments": [
+    "update_player's filter `if v is not None` correctly prevents resets but also makes explicit nulling impossible — fine, just be aware it diverges from strict PATCH semantics.",
+    "update_player returns find_one with {'_id': 0} — ObjectId correctly excluded.",
+    "is_captain is not in PlayerUpdate, so it can never be clobbered by a client PUT — verified against a live seeded captain."
+  ],
+  "updated_files": ["/app/backend/tests/test_player_partial_update.py"],
+  "success_rate": {"backend": "100% (9/9 new partial-PUT tests; 9/10 in iteration_10 regression suite, the 1 failure being a known xdist parallelism flake that passes in isolation)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Only ephemeral TEST_PARTIAL* players created and deleted; module-level cleanup fixture also sweeps any stray TEST_ players. Post-run state verified: 12 teams / 72 players / 12 captains, no TEST_ residue. No real player data modified (captain test used a no-op same-name PUT).",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "Referee PIN 9832 via POST /api/auth/referee/login (from /app/memory/test_credentials.md)",
+  "context_for_next_testing_agent": "PUT /api/players/{id} partial update is now verified correct — regression suite at /app/backend/tests/test_player_partial_update.py. Remaining known gaps: no team_id/category/name validation on player endpoints, and PUT /api/teams/{id} still non-partial (TeamIn) so omitted team fields will reset — worth an explicit test if teams editing is ever touched. TestLeaderboardCascade in test_edit_invariants.py must be run in isolation (xdist shared-state flake).",
+  "rca_of_the_issue": "Original bug: update_player bound the request body to PlayerIn, whose contact/age/category fields carried defaults ('', None, 'beginner'), so Pydantic materialised those defaults for omitted keys and $set wrote them over stored values. Fix (verified): a separate PlayerUpdate model with all-Optional/no-meaningful-default fields plus body.dict(exclude_unset=True) so only keys actually present in the JSON body reach $set; empty resulting dict raises 400 'No fields to update'."
+}
