@@ -1,0 +1,73 @@
+{
+  "summary": "Backend-only verification of /admin/restore invariants on the preview URL (Atlas db 'picklescore'). 11 tests across 2 new suites; 7 passed, 4 failed (3 are confirmed real defects/risks, 1 is a data-availability blocker). VERIFIED GOOD: auth guard (no token 401, wrong token 401, correct token 200, /admin/backup also 401 without token), no-op payload (all collections null) touches nothing, matches-only payload with replace=True preserves every match id byte-for-byte, teams/players/fixtures untouched by a matches-only restore, leaderboard math is exact after a direct match rewrite (score swap 15-0 -> 0-15 moved exactly 15 tournament_points/points_for from team A to team B, points_against mirrored, match_wins flipped 1, matches_played unchanged), fixture total_a/total_b == sum of its match scores after the rewrite, restore is fully idempotent (same payload twice -> identical doc set, no dupes/losses), and /admin/restore IS a working escape hatch for flipping winner_team_id. BLOCKER: the preview DB contains 0 fixtures and 0 matches (12 teams, 72 players, all leaderboard rows 0 points), so the MANAN vs MOHIK Round 2 Match 2 = 15-12 correction CANNOT be verified here — that data lives in a different (production) DB. All test fixtures cleaned up; DB left at 12 teams / 72 players / 0 fixtures / 0 matches (exact pre-test state).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/admin/restore",
+        "issue": "DATA LOSS by design: a matches-only payload with replace=True does `delete_many({})` then inserts ONLY the payload docs. Reproduced: 2 fixtures / 26 matches, sent the 13 matches of fixture F1 -> all 13 matches of F2 were deleted (F2 left with an empty match list while its fixture doc survives, i.e. orphaned fixture). Same applies to teams/players/fixtures keys. The endpoint has no guard/dry-run/count-diff warning. Any production score correction MUST post the complete collection from /admin/backup, otherwise the tournament is wiped.",
+        "priority": "CRITICAL"
+      },
+      {
+        "endpoint": "PUT /api/matches/{id}",
+        "issue": "Confirmed (carried from iteration_10): crossover score edit does not flip winner_team_id. Match completed 15-0 for team A, PUT {score_a:12, score_b:15} -> 200 with scores 12-15 but winner_team_id still team A (the loser). The guard `status=='completed' and not winner_team_id` skips recompute. Leaderboard is unaffected (it derives wins from scores) but /api/matches/{id}, fixture UI and any winner_team_id consumer show the wrong winner.",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "N/A (preview data state)",
+        "issue": "Preview DB (Atlas cluster0.awe5jm0, DB_NAME=picklescore) has fixtures=[] and matches=[]; every leaderboard row is 0/0. The MANAN vs MOHIK R2M2 15-12 fix is NOT present/verifiable in the environment the test agent can reach. Either the fix was applied to a different DB (production) or the preview data was wiped. Needs confirmation before claiming the fix is live.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": [
+      {
+        "endpoint": "POST /api/admin/restore",
+        "issue": "replace=False blindly insert_many's, creating duplicate documents with the same logical `id` (reproduced: 2 docs sharing one match id). No unique index on `id` in matches_col, so all reads silently take the first match. Either drop replace=False, use bulk upsert on `id`, or add a unique index."
+      },
+      {
+        "endpoint": "POST /api/admin/restore",
+        "issue": "No schema validation on payload docs (list[dict]) — a doc missing `id` / `fixture_id` / `team_a_id` will be inserted and later blow up hydrate_match/leaderboard. Consider validating required keys before the delete_many."
+      },
+      {
+        "endpoint": "POST /api/admin/restore",
+        "issue": "delete_many + insert_many are not transactional and not per-collection atomic; a failure between them leaves the collection empty. On an Atlas replica set a session/transaction is available and should be used."
+      },
+      {
+        "endpoint": "POST /api/admin/restore",
+        "issue": "Only broadcasts {'type':'teams_changed'} — clients watching fixture_changed will not refresh after a match rewrite. Should also broadcast fixture_changed."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_admin_restore.py",
+    "/app/backend/tests/test_restore_safety.py",
+    "/app/test_reports/pytest/iter12_admin_restore.xml",
+    "/app/test_reports/pytest/iter12_restore_safety.xml",
+    "/app/test_reports/pytest/iter12_pretest_snapshot.json"
+  ],
+  "action_items": [
+    "Confirm which DB the MANAN vs MOHIK correction was applied to — the preview DB has zero fixtures/matches, so the fix is unverifiable there. If production is a separate DB, note it so future test iterations do not assume preview parity.",
+    "Harden POST /api/admin/restore: reject a replace=True payload whose doc count is drastically lower than the current collection (or require an explicit `allow_shrink`/`dry_run` flag) — today a partial matches list silently deletes every other match.",
+    "Fix update_match winner recomputation: recompute winner_team_id whenever score_a/score_b are in the update body and status=='completed' (not only when winner_team_id is falsy). Set winner=None on a tie.",
+    "Replace replace=False append behaviour with an upsert-on-id bulk write, and/or add a unique index on `id` for matches/fixtures/teams/players.",
+    "Broadcast fixture_changed (in addition to teams_changed) from /admin/restore so live clients refresh scores."
+  ],
+  "critical_code_review_comments": [
+    "server.py _reload(): `delete_many({})` before `insert_many(docs)` with no count sanity-check is the single most dangerous line in the codebase for a live tournament — it is the documented workflow for score fixes.",
+    "server.py _reload(): strips only `_id`; everything else is trusted verbatim. No Pydantic model per collection means a malformed backup corrupts the DB shape.",
+    "server.py update_match(): the `and not m.get('winner_team_id')` clause makes the winner field permanently sticky after the first completion — score edits and winner are now inconsistent sources of truth.",
+    "leaderboard(): derives match_wins from score comparison while match docs carry winner_team_id; two sources of truth for the same fact. Pick one (recommend recomputing winner from scores on every write).",
+    "/admin/backup returns the entire DB behind a single static env token with no rate limiting or audit log; consider logging who/when for restores."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_admin_restore.py",
+    "/app/backend/tests/test_restore_safety.py"
+  ],
+  "success_rate": {"backend": "64% (7/11 — all 4 failures are asserted-defect reproductions, not test-harness errors)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "Created 4 short-lived TEST fixtures (courts 9, 91, 92, 93/94) between existing seeded teams, played one match to 15-0 in each to exercise the scoring flow, then deleted all of them and hard-restored the pre-test snapshot. Verified final state: 12 teams, 72 players, 0 fixtures, 0 matches — identical to pre-test. No leftovers.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "Referee PIN 9832 (POST /api/auth/referee/login -> access_token); X-Maint-Token: restore-9832-picklewave (both work)",
+  "context_for_next_testing_agent": "Suites: test_admin_restore.py (auth guard, id preservation, leaderboard delta math, idempotency, replace=False dupes, MANAN/MOHIK prod-data check) and test_restore_safety.py (winner flip bug, partial-payload data loss). BOTH ARE DESTRUCTIVE — always run with `-n 0` (serial); pytest.ini's default `-n 2 --dist loadscope` will race them against other suites. Each suite snapshots via /admin/backup at module start and hard-restores at teardown. Preview DB currently holds 12 teams / 72 players / 0 fixtures / 0 matches, so test_manan_vs_mohik_r2m2_scores fails with 'no MANAN vs MOHIK fixture found' until real tournament data is seeded into the preview DB (it will skip only if the teams themselves are absent). The other 3 failures are intentional defect reproductions — they should turn green once the winner-recompute and restore-guard fixes land.",
+  "rca_of_the_issue": "1) Winner flip: update_match() only derives winner_team_id when `m['status']=='completed' and not m.get('winner_team_id')`. A match completed through the scoring flow always has winner_team_id set, so a later crossover score edit updates only the scores, leaving a stale winner. Repro: create fixture (target 15) -> start fixture/round -> assign players -> start match -> POST /score?side=a x15 (winner=A) -> PUT {score_a:12, score_b:15} -> GET match shows 12-15 with winner=A. Fix: recompute winner whenever score_a/score_b appear in the update body and status is completed. 2) Restore data loss: _reload() unconditionally delete_many({}) on any collection present in the payload when replace=True, so a partial list is interpreted as the entire new collection. Repro: 2 fixtures (26 matches), POST /admin/restore {matches:[13 matches of F1], replace:true} -> F2's 13 matches gone, F2 fixture doc orphaned. Mitigation until fixed: always GET /admin/backup and post the full matches array back."
+}
