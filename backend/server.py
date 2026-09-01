@@ -46,6 +46,7 @@ TOKEN_TTL_MIN = 60 * 24 * 30  # 30 days — practical for a multi-week tournamen
 ADMIN_EMAIL = os.environ["ADMIN_EMAIL"]
 ADMIN_DEFAULT_PASSWORD = os.environ["ADMIN_DEFAULT_PASSWORD"]
 REFEREE_DEFAULT_PIN = os.environ["REFEREE_DEFAULT_PIN"]
+ADMIN_DEFAULT_PIN = os.environ["ADMIN_DEFAULT_PIN"]
 ADMIN_MAINT_TOKEN = os.environ.get("ADMIN_MAINT_TOKEN", "")
 
 ROUNDS_PER_FIXTURE = 4
@@ -303,11 +304,18 @@ async def seed_initial() -> None:
             "id": str(uuid.uuid4()),
             "email": ADMIN_EMAIL,
             "password_hash": hash_pw(ADMIN_DEFAULT_PASSWORD),
+            "pin_hash": hash_pw(ADMIN_DEFAULT_PIN),
             "role": "admin",
             "name": "Tournament Admin",
             "created_at": now,
         })
-        log.info("Seeded admin %s", ADMIN_EMAIL)
+        log.info("Seeded admin %s (PIN=%s)", ADMIN_EMAIL, ADMIN_DEFAULT_PIN)
+    else:
+        # Always refresh admin PIN hash so env rotation takes effect on restart.
+        await users_col.update_one(
+            {"email": ADMIN_EMAIL, "role": "admin"},
+            {"$set": {"pin_hash": hash_pw(ADMIN_DEFAULT_PIN)}},
+        )
 
     if not await users_col.find_one({"role": "referee", "name": "Referee 1"}):
         await users_col.insert_one({
@@ -479,6 +487,19 @@ async def referee_login(body: RefereeLogin):
             return TokenOut(access_token=make_token(ref["id"], "referee"), role="referee",
                             user_id=ref["id"], name=ref.get("name"))
     raise HTTPException(401, "Invalid PIN")
+
+
+@api.post("/auth/admin/pin-login", response_model=TokenOut)
+async def admin_pin_login(body: RefereeLogin):
+    pin = body.pin.strip()
+    if len(pin) != 4 or not pin.isdigit():
+        raise HTTPException(400, "PIN must be 4 digits")
+    async for admin in users_col.find({"role": "admin"}):
+        pin_hash = admin.get("pin_hash")
+        if pin_hash and check_pw(pin, pin_hash):
+            return TokenOut(access_token=make_token(admin["id"], "admin"), role="admin",
+                            user_id=admin["id"], name=admin.get("name"))
+    raise HTTPException(401, "Invalid admin PIN")
 
 
 @api.get("/auth/me")
@@ -668,7 +689,7 @@ async def get_fixture(fixture_id: str):
 
 
 @api.post("/fixtures")
-async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("admin", "referee"))):
+async def create_fixture(body: FixtureCreate, _: dict = Depends(require_role("admin"))):
     if body.team_a_id == body.team_b_id:
         raise HTTPException(400, "Teams must differ")
     await get_team(body.team_a_id)
@@ -721,7 +742,7 @@ async def update_fixture(fixture_id: str, body: FixtureUpdate, _: dict = Depends
 
 
 @api.delete("/fixtures/{fixture_id}")
-async def delete_fixture(fixture_id: str, _: dict = Depends(require_role("admin", "referee"))):
+async def delete_fixture(fixture_id: str, _: dict = Depends(require_role("admin"))):
     await fixtures_col.delete_one({"id": fixture_id})
     await matches_col.delete_many({"fixture_id": fixture_id})
     await hub.broadcast({"type": "fixture_changed", "fixture_id": fixture_id})

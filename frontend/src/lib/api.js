@@ -43,11 +43,16 @@ api.interceptors.response.use(
     // Force logout on ANY 401 from protected referee/admin endpoints.
     // Skip login endpoints (they naturally 401 on bad PIN without meaning the
     // stored session is stale).
-    const isLoginCall = url.includes("/auth/admin/login") || url.includes("/auth/referee/login");
+    const isLoginCall = url.includes("/auth/admin/login") || url.includes("/auth/referee/login") || url.includes("/auth/admin/pin-login");
     if (status === 401 && !isLoginCall) {
       clearAuth();
-      if (typeof window !== "undefined" && window.location.pathname.startsWith("/referee")) {
-        window.location.replace("/ref?expired=1");
+      if (typeof window !== "undefined") {
+        const p = window.location.pathname;
+        if (p.startsWith("/referee/admin")) {
+          window.location.replace("/admin?expired=1");
+        } else if (p.startsWith("/referee")) {
+          window.location.replace("/ref?expired=1");
+        }
       }
     }
     return Promise.reject(err);
@@ -66,6 +71,8 @@ export const endpoints = {
   auth_me: () => api.get("/auth/me").then((r) => r.data),
   refereeLogin: (pin) =>
     api.post("/auth/referee/login", { pin }).then((r) => r.data),
+  adminLogin: (pin) =>
+    api.post("/auth/admin/pin-login", { pin }).then((r) => r.data),
 
   createFixture: (payload) => api.post("/fixtures", payload).then((r) => r.data),
   deleteFixture: (id) => api.delete(`/fixtures/${id}`).then((r) => r.data),

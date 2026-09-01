@@ -1,45 +1,67 @@
 # Kurukshetra Picklewave — PRD
 
 ## Original problem statement
-Rebuild the "PickleScore" tournament backend (provided as-is by the user) into a React web app for a live-scoring pickleball tournament. Move hardcoded JWT_SECRET / ADMIN_EMAIL / REFEREE_PIN to environment variables. Support 8 teams, 2v2 matches, fixtures with 4 rounds × 3 matches, real-time WebSocket sync, hidden `/ref` PIN login for referees, one-handed mobile scoring UI, and a leaderboard sorted by total tournament points.
+Mobile-first PWA for a live pickleball tournament: 12 teams (Season 2), 6 players each. Public live scoring with real-time WebSocket sync (no login), hidden referee PIN login for scoring, and admin PIN login for tournament setup (create/delete fixtures).
 
 ## Personas
 - **Public viewer / player**: watches live scores, browses teams and standings; no login.
-- **Referee**: enters PIN at `/ref`, controls fixtures/rounds/matches, updates scores.
-- **Admin** (superset of referee): creates and deletes fixtures.
+- **Referee** (PIN 4711 @ `/ref`): starts/pauses/scores/undoes matches; edits match target & score; assigns players. CANNOT create or delete fixtures.
+- **Admin** (PIN 2580 @ `/admin`): full referee powers PLUS creating and deleting fixtures.
 
 ## Architecture
 - **Backend**: FastAPI + Motor (async) + native WebSocket hub, PyJWT auth, bcrypt hashing.
-- **Frontend**: React 19 + Tailwind + shadcn/ui + Sonner + Lucide + React Router v7.
-- **DB**: MongoDB (currently pointed at user's Atlas cluster `court-live-4`, DB name `court-live-4-test_database`).
-- Real-time: `/api/ws` broadcasts `{type: "fixture_changed" | "teams_changed"}` on every mutation. Front-end auto-reloads via the `useLive` hook.
+- **Frontend**: React 19 + Tailwind + shadcn/ui + Sonner + Lucide + React Router.
+- **DB**: MongoDB Atlas cluster `court-live-4` (shared preview + prod).
+- Real-time: `/api/ws` broadcasts `{type: "fixture_changed" | "teams_changed"}` on every mutation.
 
-## Secrets (moved from hardcoded to env)
-- `JWT_SECRET`, `ADMIN_EMAIL`, `ADMIN_DEFAULT_PASSWORD`, `REFEREE_DEFAULT_PIN` — all read from `backend/.env`.
+## Auth model (2026-02-01)
+- Admin and Referee are distinct roles with separate PIN endpoints:
+  - `POST /api/auth/admin/pin-login` → role=admin
+  - `POST /api/auth/referee/login`   → role=referee
+- Fixture create/delete endpoints locked to `admin` role only (403 for referee).
+- All other referee endpoints (start/score/undo/pause/finish/edit match) remain shared.
+- Env vars: `REFEREE_DEFAULT_PIN=4711`, `ADMIN_DEFAULT_PIN=2580`. PIN hashes are refreshed on every backend startup so rotating the env value takes effect immediately.
 
-## Implemented (2026-02)
-- Full backend from provided blueprint (all routes, seeding, WS, cascade auto-complete, leaderboard).
-- React web app:
-  - Public routes: `/` (Games), `/teams`, `/standings`, `/fixture/:id`.
-  - Sticky bottom tab bar with data-testids.
-  - Hidden `/ref` PIN pad login.
-  - Referee routes: `/referee` (dashboard), `/referee/admin`, `/referee/fixture/:id` (round & match control + player assignment sheet), `/referee/match/:id` (one-handed giant tap targets, undo/pause/finish, live rail).
-  - Dark obsidian default + emerald-green light theme (Barlow Condensed + DM Sans fonts).
-  - Real-time sync via `useLive` hook.
-- Design guidelines followed (no purple/violet, no Inter/Roboto, high-contrast score numbers).
-- `test_credentials.md` updated: admin `shanaygala@gmail.com / admin123`, referee PIN `9832`.
+## Implemented (2026-02-01, this session)
+- Separate Admin PIN login flow (`/admin` route + AdminLogin page + `endpoints.adminLogin`).
+- Backend endpoint `POST /api/auth/admin/pin-login` and admin `pin_hash` seeding.
+- Locked `POST /api/fixtures` and `DELETE /api/fixtures/{id}` to `admin` role only.
+- Referee dashboard hides Admin button when role !== admin.
+- RefereeAdmin page redirects non-admins away (to `/admin` if unauthed, to `/referee` if referee).
+- 401 interceptor now routes admin-panel expirations to `/admin?expired=1`.
+- Rotated referee PIN 9832 → 4711.
 
-## Known blocker
-- Atlas cluster `court-live-4` is not currently reachable from the container (TCP timeout on :27017). Fix: whitelist container egress IP `104.198.214.223` (or `0.0.0.0/0` for dev) in Atlas Network Access. Once fixed, backend seeds all 8 teams automatically on startup.
+## Prior implemented (previous sessions)
+- Season 2 migration (12 teams, 72 players), MongoDB Atlas cluster.
+- `/api/admin/backup` + `/api/admin/restore` endpoints.
+- Team detail redesign, Captain chip sizing, token TTL 30 days.
+- Optimistic Start Match navigation + skeleton loaders.
+- Direct edit of match target/score via EditMatchSheet.
+- 1v1 and 2v2 support; 3-3-4-3 round layout.
+- `PUT /api/players/{id}` partial updates.
+
+## Known blockers / pending user input
+- **Points reconciliation (P0, BLOCKED)**: User wants offline point table (before Week 5) to override app standings. Waiting on the user to type out per-team PTS since the image was stripped from history.
 
 ## Prioritized backlog
-- P1: PWA manifest + service worker for "Add to Home Screen".
-- P2: CSV export of final standings.
-- P2: Admin screen to edit baseline points mid-tournament.
-- P2: Referee re-authentication timeout / activity indicator.
+- P1: `PUT /api/teams/{id}` partial update.
+- P1: Audit log collection for fixture create/update/delete.
+- P2: `PUT /api/matches/{id}` auto flip `winner_team_id` on crossover edit.
+- P2: `POST /api/admin/restore` add safe `merge` mode.
+- P2: Player validation hardening (reject empty names / bad team_id / arbitrary category).
+- P2: CSV/PDF export of final standings.
+- P2: PWA manifest.json + service worker.
 
 ## Files map (frontend)
-- `src/App.js` — router
-- `src/pages/GamesPage.js`, `TeamsPage.js`, `StandingsPage.js`, `FixtureDetail.js`, `RefLogin.js`, `RefereeDashboard.js`, `RefereeAdmin.js`, `RefereeFixture.js`, `RefereeMatch.js`
-- `src/components/AppHeader.js`, `BottomNav.js`, `FixtureCard.js`, `StatusBadge.js`, `ThemeToggle.js`
-- `src/lib/api.js`, `useLive.js`, `format.js`
+- `src/App.js` — router (adds `/admin`)
+- `src/pages/AdminLogin.js` — new admin PIN pad
+- `src/pages/RefLogin.js` — referee PIN pad
+- `src/pages/RefereeDashboard.js` — admin button gated by role
+- `src/pages/RefereeAdmin.js` — admin-only guard
+- `src/lib/api.js` — `endpoints.adminLogin`, 401 interceptor routing
+
+## Files map (backend)
+- `server.py`:
+  - Auth: `admin_pin_login` at `/api/auth/admin/pin-login`
+  - Seed: refreshes admin & referee `pin_hash` on startup
+  - Fixture routes: `require_role("admin")` on create + delete

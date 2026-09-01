@@ -17,7 +17,11 @@ export default function RefereeAdmin() {
   const [target, setTarget] = useState(15);
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => { if (!getRole()) nav("/ref", { replace: true }); }, [nav]);
+  useEffect(() => {
+    const role = getRole();
+    if (!role) { nav("/admin", { replace: true }); return; }
+    if (role !== "admin") { nav("/referee", { replace: true }); toast.error("Admin access required"); }
+  }, [nav]);
 
   const load = async () => {
     const [ts, fs] = await Promise.all([endpoints.teams(), endpoints.fixtures()]);

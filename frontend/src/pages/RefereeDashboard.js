@@ -49,13 +49,15 @@ export default function RefereeDashboard() {
         week={week}
         right={
           <div className="flex items-center gap-2">
-            <Link
-              to="/referee/admin"
-              data-testid="admin-link"
-              className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-card px-2.5 text-[11px] font-bold uppercase tracking-widest hover:border-primary/60"
-            >
-              <Settings className="h-3.5 w-3.5" /> Admin
-            </Link>
+            {getRole() === "admin" && (
+              <Link
+                to="/referee/admin"
+                data-testid="admin-link"
+                className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border bg-card px-2.5 text-[11px] font-bold uppercase tracking-widest hover:border-primary/60"
+              >
+                <Settings className="h-3.5 w-3.5" /> Admin
+              </Link>
+            )}
             <button
               onClick={logout}
               data-testid="logout-btn"
@@ -78,7 +80,7 @@ export default function RefereeDashboard() {
         <div className="mt-5 grid gap-3">
           {fixtures.length === 0 && (
             <div className="rounded-sm border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No fixtures yet. Create one in <Link to="/referee/admin" className="text-primary underline">Admin</Link>.
+              No fixtures yet.{getRole() === "admin" && (<> Create one in <Link to="/referee/admin" className="text-primary underline">Admin</Link>.</>)}
             </div>
           )}
           {[...fixtures]
