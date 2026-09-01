@@ -30,6 +30,11 @@ Mobile-first PWA for a live pickleball tournament: 12 teams (Season 2), 6 player
 - RefereeAdmin page redirects non-admins away (to `/admin` if unauthed, to `/referee` if referee).
 - 401 interceptor now routes admin-panel expirations to `/admin?expired=1`.
 - Rotated referee PIN 9832 → 4711.
+- **Self-healing standings reconciliation on startup**: `reconcile_offline_standings()` in
+  `server.py` computes per-team PF pre-Week-5 from match data and injects
+  `bonus_points = target - PF_pre_week5` so leaderboard = offline_table + Week5_PF.
+  Guarded by `RECONCILE_KEY` marker in `db.system_flags` — runs once per key value.
+  Change the key value to re-run after a future edit to `OFFLINE_PRE_WEEK5_TARGETS`.
 
 ## Prior implemented (previous sessions)
 - Season 2 migration (12 teams, 72 players), MongoDB Atlas cluster.

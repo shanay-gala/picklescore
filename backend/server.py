@@ -349,9 +349,86 @@ async def seed_initial() -> None:
         log.info("Seeded %d teams", len(SEED_TEAMS))
 
 
+# ---------- One-time offline-standings reconciliation ----------
+# Locks `bonus_points` per team such that the leaderboard shows:
+#   offline_pre_week5_target + PF_from_week5_matches
+# The formula is: bonus_points = target - PF_pre_week5
+# so that (bonus_points + PF_all_matches) == target + PF_week5.
+# Runs exactly once per RECONCILE_KEY value (change key in code to re-run).
+OFFLINE_PRE_WEEK5_TARGETS = {
+    "DEVEN":     675,
+    "HEMIL":     670,
+    "DHEER":     634,
+    "HETANKSH":  611,
+    "PRATIK":    594,
+    "PRATIK G":  552,
+    "PARTH":     642,
+    "SIDDHARTH": 636,
+    "MANAN":     631,
+    "MOHIK":     620,
+    "KEVIN":     584,
+    "URVIL":     569,
+}
+RECONCILE_KEY = "offline-standings-prewk5-2026-02-a"
+
+
+async def reconcile_offline_standings() -> None:
+    flags_col = db.system_flags
+    if await flags_col.find_one({"key": RECONCILE_KEY}):
+        log.info("Standings reconciliation '%s' already applied — skipping.", RECONCILE_KEY)
+        return
+
+    teams = await teams_col.find({}, {"_id": 0}).to_list(50)
+    name_to_id = {t["name"]: t["id"] for t in teams}
+
+    week5_ids = set()
+    async for f in fixtures_col.find({"week_number": 5}, {"_id": 0, "id": 1}):
+        week5_ids.add(f["id"])
+    log.info("Reconcile: found %d Week-5 fixtures", len(week5_ids))
+
+    pf_pre: dict[str, int] = {t["id"]: 0 for t in teams}
+    async for m in matches_col.find(
+        {}, {"_id": 0, "score_a": 1, "score_b": 1, "status": 1,
+             "team_a_id": 1, "team_b_id": 1, "fixture_id": 1},
+    ):
+        sa = int(m.get("score_a") or 0)
+        sb = int(m.get("score_b") or 0)
+        if sa == 0 and sb == 0 and m.get("status") != "completed":
+            continue
+        if m.get("fixture_id") in week5_ids:
+            continue
+        if m["team_a_id"] in pf_pre:
+            pf_pre[m["team_a_id"]] += sa
+        if m["team_b_id"] in pf_pre:
+            pf_pre[m["team_b_id"]] += sb
+
+    updates: list[tuple[str, str, int, int]] = []
+    for name, target in OFFLINE_PRE_WEEK5_TARGETS.items():
+        tid = name_to_id.get(name)
+        if not tid:
+            log.warning("Reconcile: team '%s' not in DB — skipping", name)
+            continue
+        new_bonus = int(target) - int(pf_pre[tid])
+        updates.append((tid, name, int(target), new_bonus))
+        await teams_col.update_one({"id": tid}, {"$set": {"bonus_points": new_bonus}})
+        log.info("Reconcile: %s target=%d pre_pf=%d -> bonus_points=%d",
+                 name, target, pf_pre[tid], new_bonus)
+
+    await flags_col.insert_one({
+        "key": RECONCILE_KEY,
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "updates": [{"team": n, "target": t, "bonus_points": b} for _, n, t, b in updates],
+    })
+    log.info("Reconcile: locked %d teams under key '%s'", len(updates), RECONCILE_KEY)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await seed_initial()
+    try:
+        await reconcile_offline_standings()
+    except Exception as e:
+        log.exception("reconcile_offline_standings failed: %s", e)
     yield
     client.close()
 
